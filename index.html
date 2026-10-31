@@ -7646,17 +7646,18 @@ body.noui #stage::after{display:none}
   if (!CINE_ON) return;
 
   const Q = {
-    ss: isMobile ? 0.9 : 1.12,       // 超采样倍数
+    ss: isMobile ? 0.86 : 1.0,       // 与画布 1:1（超采样只做非整数重采样 = 变糊）
     ssBase: isMobile ? 0.9 : 1.12,
     ao: true,
     bloom: true,
     grain: true,
     ca: true,
     fogBank: !isMobile && QS.get('fogbank') !== '0',
-    dust: false
+    dust: false,
+    refl: QS.get('refl') !== '0'   // 河道倒影：等于把整场景再画一遍，慢机器上会被档位最先关掉
   };
-  if (QS.get('q') === 'low') { Q.ss = 1.0; Q.bloom = false; Q.grain = false; Q.ca = false; Q.fogBank = false; Q.dust = false; }
-  if (QS.get('q') === 'high') { Q.ss = 1.5; }
+  if (QS.get('q') === 'low') { Q.bloom = false; Q.grain = false; Q.ca = false; Q.fogBank = false; Q.dust = false; Q.refl = false; }
+  if (QS.get('q') === 'high') { Q.ss = 1.5; Q.ao = true; }
 
   // 现场调参：?exp=1.1&fog=0.0016&bloom=0.5&ao=0.8&sat=1.06&vig=0.86&grain=0.03&cloud=0.7
   const TUNE = {
@@ -7703,7 +7704,16 @@ body.noui #stage::after{display:none}
   let stage = null;
   const clock = new THREE.Clock();
   let t = 0, frameNo = 0;
-  let perfAcc = 0, perfN = 0, lastFps = 0, qDirty = false;
+  let perfAcc = 0, perfN = 0, lastFps = 0, qDirty = false, fxLevel = 0;
+  /* 掉帧时只砍效果，绝不降分辨率（降分辨率就是画面发糊）。 */
+  function applyFx() {
+    if (Q.refl === undefined) Q.refl = true;
+    if (fxLevel >= 1) Q.refl = false;
+    if (fxLevel >= 2) { Q.ao = false; if (compMat) compMat.uniforms.uAO.value = 0.0; }
+    if (fxLevel >= 3) { Q.bloom = false; Q.ca = false; if (compMat) { compMat.uniforms.uBloom.value = 0.0; compMat.uniforms.uCA.value = 0.0; } }
+    if (fxLevel === 0) { Q.ao = true; Q.ca = true; Q.bloom = true; }
+    if (hudEl) hudEl.dataset.fx = String(fxLevel);
+  }
   let fadeIn = 0, t0 = (typeof performance !== 'undefined' ? performance.now() : 0);
   let adaptAcc = 0, adaptN = 0, adaptChecked = 0;
   let sunDirView = new THREE.Vector3();
@@ -7928,7 +7938,7 @@ body.noui #stage::after{display:none}
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.shadowMap.needsUpdate = true;
-    renderer.shadowMap.autoUpdate = true;
+    renderer.shadowMap.autoUpdate = false;   // 手动节流：每 6 帧刷一次
 
     // 让所有网格参与投射/接收，并强制重编译（原场景里投影完全没生效）
     let n = 0;
@@ -8483,38 +8493,6 @@ body.noui #stage::after{display:none}
     seaMat = gp.material;
     if (deco) deco.ground = gp;
   }
-  /* 小洲：远处水面上要有东西，水面才有纵深和尺度感。纯装饰。 */
-  function buildIslets() {
-    if (!deco || deco.islets || !scene) return;
-    const M = global.MODELS;
-    if (!M || typeof M.tree !== 'function') return;
-    const grp = new THREE.Group();
-    grp.name = 'cine-islets';
-    const moundMat = new THREE.MeshStandardMaterial({ color: 0x39432f, roughness: 0.95, metalness: 0.0 });
-    const spots = [[64,0.42,5.4],[78,1.28,4.2],[96,2.35,6.8],[110,3.42,5.0],[70,4.15,3.6],[88,5.05,6.0],[118,5.62,4.6]];
-    for (let i = 0; i < spots.length; i++) {
-      const rad = spots[i][0], ang = spots[i][1], sz = spots[i][2] * (0.75 + Math.random() * 0.5);
-      const cx = Math.cos(ang) * rad, cz = Math.sin(ang) * rad;
-      const mound = new THREE.Mesh(new THREE.CylinderGeometry(sz, sz * 1.22, 0.55, 10), moundMat);
-      mound.position.set(cx, -0.62, cz);
-      grp.add(mound);
-      const nt = 2 + ((Math.random() * 3) | 0);
-      for (let k = 0; k < nt; k++) {
-        const a2 = Math.random() * 6.28318, r2 = sz * Math.random() * 0.55;
-        const type = Math.random() < 0.28 ? 'pine' : (Math.random() < 0.30 ? 'willow' : 'camphor');
-        let tree;
-        try { tree = M.tree({ type: type, h: 5.5 + Math.random() * 2.5, tint: 0.2 + Math.random() * 0.5, shape: Math.random() }, Math.random); } catch (e) { continue; }
-        const k2 = 0.52 + Math.random() * 0.28;
-        tree.scale.set(k2 * (0.9 + Math.random() * 0.2), k2, k2 * (0.9 + Math.random() * 0.2));
-        tree.position.set(cx + Math.cos(a2) * r2, -0.40, cz + Math.sin(a2) * r2);
-        tree.rotation.y = Math.random() * 6.28318;
-        grp.add(tree);
-      }
-    }
-    scene.add(grp);
-    deco.islets = grp;
-  }
-
   function decorate() {    if (decorated || !scene) return;
     decorated = true;
     const grp = new THREE.Group();
@@ -8536,7 +8514,6 @@ body.noui #stage::after{display:none}
 
     // 远景：把村庄坐进一片开阔水面，一路亮到天光（不再是黑虚空）
     try { refreshSea(); } catch (e) { }
-    try { buildIslets(); } catch (e) { console.warn("[CINE] islets", e); }
     try {
       const fc = (scene.fog && scene.fog.color) ? scene.fog.color : new THREE.Color(0xcfd8ce);
       void grp;
@@ -8927,13 +8904,14 @@ body.noui #stage::after{display:none}
     if (perfN >= 30) {
       lastFps = Math.round(perfN / Math.max(perfAcc, 1e-4)); perfAcc = 0; perfN = 0;
       if (hudEl) hudEl.textContent = lastFps + ' fps · ' + SW + 'x' + SH;
-      if (!QS.get('fixq') && ready && frameNo > 90) {
-        if (lastFps < 36 && Q.ss > 0.98) { Q.ss = 0.98; qDirty = true; }
-        else if (lastFps > 58 && Q.ss < Q.ssBase) { Q.ss = Q.ssBase; qDirty = true; }
+      if (!QS.get('fixq') && ready && frameNo > 60) {
+        if (lastFps < 40 && fxLevel < 3) { fxLevel++; applyFx(); }
+        else if (lastFps > 56 && fxLevel > 0) { fxLevel--; applyFx(); }
       }
     }
 
     if (qDirty) { qDirty = false; resize(); }
+    if (renderer && (frameNo % 6) === 0) renderer.shadowMap.needsUpdate = true;
     // 缓冲尺寸跟随窗口（无头/首帧时 init 拿到的尺寸可能还不是最终值）
     if ((frameNo % 4) === 1) {
       renderer.getDrawingBufferSize(V2);
@@ -8981,7 +8959,7 @@ body.noui #stage::after{display:none}
     }
     // 0) 镜面倒影：把水面当镜子，用镜像相机单独渲一张，供水面着色器投影取样
     // 倒影隔帧更新：视觉上几乎看不出，省一半场景渲染开销
-    if ((frameNo & 1) === 0 || !rtRefl) renderReflection();
+    if (Q.refl && ((frameNo % 3) === 0 || !rtRefl)) renderReflection();
 
     renderer.setRenderTarget(rtScene);
     renderer.setClearColor(0x000000, 1);
