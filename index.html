@@ -6278,10 +6278,10 @@ body.noui #stage::after{display:none}
               const tv = t.tv === undefined ? 0.5 : t.tv;
               const bucket = tv < 0.09 ? 'a' : tv < 0.24 ? 'b' : 'g';
               m = variant('tree:' + t.type + ':' + bucket,
-                r2 => MODELS.tree({ type: t.type, h: ref, tint: bucket === 'a' ? 0.85 : bucket === 'b' ? 0.38 : 0, shape: t.sh }, r2), 5);
+                r2 => MODELS.tree({ type: t.type, h: ref, tint: bucket === 'a' ? 0.85 : bucket === 'b' ? 0.38 : 0, shape: t.sh }, r2), 8);
             }
             const k = t.s * (t.h / ref);
-            m.scale.setScalar(k);
+            m.scale.set(k * (0.88 + rnd() * 0.26), k * (0.92 + rnd() * 0.20), k * (0.88 + rnd() * 0.26));
             m.position.set(wx(t.x), t.type === 'reed' ? -0.06 : 0, wz(t.z));
             m.rotation.y = t.ry;
             group.add(m);
@@ -8490,6 +8490,15 @@ body.noui #stage::after{display:none}
 
     try { hudEl = hudEl || makeHud(); } catch (e) { }
     if (TUNE.letterbox) { try { deco.lb = makeLetterbox(); } catch (e) { } }
+    /* 画面拉近之后，底部那条 UI 正好压在亮水面上，白字读不出来。
+       加一层很轻的暗角渐变当底衬，只压底部，不动画面中心。 */
+    try {
+      const scrim = document.createElement('div');
+      scrim.style.cssText = 'position:fixed;left:0;right:0;bottom:0;height:220px;pointer-events:none;z-index:1;' +
+        'background:linear-gradient(to top, rgba(6,8,8,0.72) 0%, rgba(6,8,8,0.42) 34%, rgba(6,8,8,0.14) 62%, rgba(6,8,8,0) 100%);';
+      document.body.appendChild(scrim);
+      deco.scrim = scrim;
+    } catch (e) { }
 
     // 远景：把村庄坐进一片开阔水面，一路亮到天光（不再是黑虚空）
     try { refreshSea(); } catch (e) { }
@@ -8644,7 +8653,7 @@ body.noui #stage::after{display:none}
     const FR = {
       // phi 是从 +Y 量的极角：0.64 只有约 53° 仰角，看着像棋盘；
       // 0.93 大约 37° 仰角，才有"站在对岸看村子"的透视
-      wide:  [1.02, 122],
+      wide:  [1.06, 110],
       over:  [0.17, 300],
       water: [1.02, 104],
       close: [1.02, 34]
