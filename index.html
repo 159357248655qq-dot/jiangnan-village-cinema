@@ -247,11 +247,11 @@ body.noui #stage::after{display:none}
 
   /* ---------- 调色板：江南 · 雨后黛瓦白墙 ---------- */
   const C = {
-    // 墙体
-    wall:        0xe6e0d2,
-    wallDirty:   0xd6cfbe,
-    wallShadow:  0xc4bcaa,
-    wallWarm:    0xefe7d3,
+    // 墙体（徽派白墙是冷白，带石灰的灰，不是米黄）
+    wall:        0xe7e7e2,
+    wallDirty:   0xd0d3ce,
+    wallShadow:  0xb8bbb6,
+    wallWarm:    0xeeeee6,
     // 瓦
     tile:        0x4c545e,
     tileDark:    0x30363d,
@@ -327,34 +327,115 @@ body.noui #stage::after{display:none}
       vertexColors: true, roughness: c.r, metalness: c.m
     });
     m.envMapIntensity = c.e;
-    // 程序化表面颗粒：两个尺度的值噪声，破除"纯色塑料面"
-    const amt = k === 'plaster' ? 0.24 : k === 'tile' ? 0.30 : k === 'leaf' ? 0.28 : 0.26;
-    m.onBeforeCompile = (sh) => {
-      sh.uniforms.uGrain = { value: amt };
-      sh.vertexShader = 'varying vec3 vWPos;\n' + sh.vertexShader.replace(
-        '#include <begin_vertex>',
-        '#include <begin_vertex>\n  vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;'
-      );
-      sh.fragmentShader = 'varying vec3 vWPos;\nuniform float uGrain;\n' + `
-        float h31(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,45.164)))*43758.5453); }
-        float vn(vec3 p){
-          vec3 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
-          float a=mix(mix(h31(i),h31(i+vec3(1.0,0.0,0.0)),f.x), mix(h31(i+vec3(0.0,1.0,0.0)),h31(i+vec3(1.0,1.0,0.0)),f.x), f.y);
-          float b=mix(mix(h31(i+vec3(0.0,0.0,1.0)),h31(i+vec3(1.0,0.0,1.0)),f.x), mix(h31(i+vec3(0.0,1.0,1.0)),h31(i+vec3(1.0,1.0,1.0)),f.x), f.y);
-          return mix(a,b,f.z);
-        }
-      ` + sh.fragmentShader.replace(
-        '#include <color_fragment>',
-        `#include <color_fragment>
-         float g1 = vn(vWPos * 1.6);
-         float g2 = vn(vWPos * 6.5);
-         float grain = (g1 * 0.65 + g2 * 0.35) - 0.5;
-         diffuseColor.rgb *= 1.0 + grain * uGrain * 2.0;`
-      );
-    };
+    m.onBeforeCompile = makeDetail(k);
     surfCache[k] = m;
     return m;
   }
+
+  /* ---------- 程序化表面细节（无贴图）：世界坐标三平面噪声 ----------
+     反照率斑驳 + 法线浮雕 + 粗糙度起伏，全部按材质类型分支。 */
+  const KIND_ID = { plaster: 0, tile: 1, wood: 2, stone: 3, leaf: 4, gold: 5, dark: 6, ground: 7 };
+
+  const DETAIL_GLSL = `
+    float dH31(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,45.164)))*43758.5453); }
+    float dVN(vec3 p){
+      vec3 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+      float a=mix(mix(dH31(i),dH31(i+vec3(1.0,0.0,0.0)),f.x), mix(dH31(i+vec3(0.0,1.0,0.0)),dH31(i+vec3(1.0,1.0,0.0)),f.x), f.y);
+      float b=mix(mix(dH31(i+vec3(0.0,0.0,1.0)),dH31(i+vec3(1.0,0.0,1.0)),f.x), mix(dH31(i+vec3(0.0,1.0,1.0)),dH31(i+vec3(1.0,1.0,1.0)),f.x), f.y);
+      return mix(a,b,f.z);
+    }
+    float dFBM(vec3 p){ return dVN(p)*0.56 + dVN(p*2.7)*0.28 + dVN(p*7.3)*0.16; }
+    vec3 dTriW(vec3 n){ vec3 w = abs(n); w *= w; w *= w; w *= w; return w / max(1e-4, w.x+w.y+w.z); }
+    float dStripe(float u, float f, float sharp){ float s = abs(sin(u*f)); return pow(s, sharp); }
+
+    float dHeight(vec3 p, vec3 w){
+      if (uKind < 0.5) {                        // 白墙：竖向雨痕 + 斑驳
+        return dFBM(p*2.4)*0.45 + dFBM(vec3(p.x*1.6, p.y*0.26, p.z*1.6))*0.55;
+      } else if (uKind < 1.5) {                 // 黛瓦：筒瓦垄
+        float s = dStripe(p.x, 15.0, 5.0)*w.y + dStripe(p.z, 15.0, 5.0)*w.y;
+        return s*0.55 + dFBM(p*9.0)*0.45;
+      } else if (uKind < 2.5) {                 // 木：顺纹
+        return dFBM(vec3(p.x*2.6, p.y*0.32, p.z*2.6))*0.7 + dFBM(p*11.0)*0.3;
+      } else if (uKind < 3.5) {                 // 石：砌缝
+        float jx = abs(fract((p.x + p.z)*1.4) - 0.5), jy = abs(fract(p.y*1.9) - 0.5);
+        return min(jx, jy)*0.7 + dFBM(p*5.0)*0.3;
+      } else if (uKind < 4.5) {                 // 叶
+        return dFBM(p*7.0)*0.6 + dVN(p*17.0)*0.4;
+      } else if (uKind > 6.5) {                 // 地面：草皮 / 土斑
+        return dFBM(p*0.9)*0.55 + dFBM(p*4.2)*0.45;
+      }
+      return dFBM(p*3.5)*0.5;
+    }
+
+    vec3 dAlbedo(vec3 p, vec3 w, float h){
+      float g = h - 0.5;
+      vec3 t = vec3(1.0) + g * uGrain * 0.45;
+      if (uKind < 0.5) {                        // 白墙：墙脚返潮、上部雨痕
+        float damp = smoothstep(1.25, 0.10, p.y);
+        float streak = dFBM(vec3(p.x*3.2, p.y*0.30, p.z*3.2));
+        t *= mix(1.0, 0.90, damp * 0.8);
+        t *= mix(1.0, 0.95, smoothstep(0.50, 0.86, streak));
+        t.b *= 1.02;
+      } else if (uKind < 1.5) {                 // 黛瓦：垄间压深
+        float s = dStripe(p.x, 15.0, 5.0)*w.y + dStripe(p.z, 15.0, 5.0)*w.y;
+        t *= 1.0 - s*0.10;
+      } else if (uKind > 6.5) {                 // 地面：干湿草斑与土色
+        float b1 = dFBM(p*0.7), b2 = dFBM(p*3.1);
+        t *= mix(1.0, 0.90, smoothstep(0.45, 0.82, b1));
+        t.g *= 1.0 + (b2 - 0.5)*0.22;
+        t.r *= 1.0 + (b2 - 0.5)*0.10;
+      }
+      return t;
+    }
+
+    float dRoughness(vec3 p, float h){
+      if (uKind < 1.5) return (0.5 - h)*0.10;
+      return (h - 0.5)*0.10;
+    }
+  `;
+
+  function makeDetail(k) {
+    const kind = KIND_ID[k] === undefined ? 3 : KIND_ID[k];
+    const amt = k === 'plaster' ? 0.30 : k === 'tile' ? 0.34 : k === 'leaf' ? 0.26
+      : k === 'ground' ? 0.40 : 0.30;
+    const relief = k === 'tile' ? 0.55 : k === 'stone' ? 0.34 : k === 'wood' ? 0.26
+      : k === 'plaster' ? 0.18 : k === 'ground' ? 0.24 : 0.12;
+    return function (sh) {
+      sh.uniforms.uKind = { value: kind };
+      sh.uniforms.uGrain = { value: amt };
+      sh.uniforms.uRelief = { value: relief };
+      sh.vertexShader = 'varying vec3 vWPos;\nvarying vec3 vWNrm;\n' + sh.vertexShader
+        .replace('#include <beginnormal_vertex>',
+          '#include <beginnormal_vertex>\n  vWNrm = normalize(mat3(modelMatrix) * objectNormal);')
+        .replace('#include <begin_vertex>',
+          '#include <begin_vertex>\n  vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = 'varying vec3 vWPos;\nvarying vec3 vWNrm;\nuniform float uKind, uGrain, uRelief;\n'
+        + DETAIL_GLSL + sh.fragmentShader
+          .replace('#include <color_fragment>', `#include <color_fragment>
+          vec3 dW = dTriW(vWNrm);
+          float dH = dHeight(vWPos, dW);
+          diffuseColor.rgb *= dAlbedo(vWPos, dW, dH);
+          float dRough = dRoughness(vWPos, dH);`)
+          .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+          roughnessFactor = clamp(roughnessFactor + dRough, 0.05, 1.0);`)
+          .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+          {
+            vec3 nW = normalize(vWNrm) * (gl_FrontFacing ? 1.0 : -1.0);
+            vec3 sX = dFdx(vWPos);
+            vec3 sY = dFdy(vWPos);
+            vec3 R1 = cross(sY, nW);
+            vec3 R2 = cross(nW, sX);
+            float fDet = dot(sX, R1);
+            vec3 grd = sign(fDet) * (dFdx(dH) * R1 + dFdy(dH) * R2);
+            float lod = 1.0 / (1.0 + 0.045 * distance(vWPos, cameraPosition));
+            vec3 nP = normalize(abs(fDet) * nW - grd * (uRelief * lod));
+            normal = normalize((viewMatrix * vec4(nP, 0.0)).xyz);
+          }`);
+    };
+  }
+
+  /* 给任意 MeshStandardMaterial 装上同一套细节 */
+  function detail(mat, k) { mat.onBeforeCompile = makeDetail(k); return mat; }
 
   /* ---------- 瓦片贴图（筒瓦 + 板瓦 + 搭接线） ---------- */
   let _roofTex = undefined;
@@ -554,6 +635,9 @@ body.noui #stage::after{display:none}
   }
 
   const _c = new THREE.Color();
+  // 全局色调乘数：建某栋宅子时临时设上，让每幢白墙的旧色/冷暖各不相同
+  let _tint = null;
+  function setTint(t) { _tint = t; }
 
   /* 给几何体上色（带极轻微的面级明暗抖动，消除塑料感） */
   function paint(geo, color, jitter, targetMat) {
@@ -563,6 +647,7 @@ body.noui #stage::after{display:none}
     const arr = new Float32Array(n * 3);
     // 顶点色以线性空间写入，输出时再编码回 sRGB，保证颜色如设计稿
     _c.setHex(color).convertSRGBToLinear();
+    if (_tint) { _c.r *= _tint.r; _c.g *= _tint.g; _c.b *= _tint.b; }
 
     if (jitter === undefined) jitter = 0.05;
     if (jitter > 0) {
@@ -1097,7 +1182,7 @@ body.noui #stage::after{display:none}
   global.GEO = {
     C, MAT, MAT_GLOW, MAT_FLAT, MAT_LEAF, mesh, box, cyl, slab, beam, quad,
     roof, pyramidRoof, matouWall, lattice, stairs, railing,
-    paint, mergeStatic, surfMat, rng: mulberry32, leafCard, leafMaterial, leafTexture, MAT_ROOF, roofTexture, quadUV
+    paint, mergeStatic, surfMat, setTint, detail, rng: mulberry32, leafCard, leafMaterial, leafTexture, MAT_ROOF, roofTexture, quadUV
   };
   global.C = C;
 })(window);
@@ -5456,12 +5541,25 @@ body.noui #stage::after{display:none}
         if (k !== K.EMPTY) continue;
         const ed = edgeDist(x, z);
         const dw = dW(x, z);
-        let p = 0.006;
-        if (ed < 15) p += 0.098 * (1 - ed / 15);      // 边缘加密
-        if (dw <= 4) p += 0.115 * (1 - dw / 5);       // 水边加密
+
+        // 宅院留白：树冠直径动辄七八格，离宅两格内不种，屋脊与马头墙才露得出来
+        let blocked = false;
+        for (let dz = -2; dz <= 2 && !blocked; dz++) {
+          for (let dx = -2; dx <= 2; dx++) {
+            const ax = x + dx, az = z + dz;
+            if (ax < 1 || az < 1 || ax >= N - 1 || az >= N - 1) continue;
+            const kk = kind[idx(ax, az)];
+            if (kk === K.HOUSE || kk === K.HALL || kk === K.PAGODA) { blocked = true; break; }
+          }
+        }
+        if (blocked) continue;
+
+        let p = 0.004;
+        if (ed < 15) p += 0.052 * (1 - ed / 15);      // 边缘加密
+        if (dw <= 4) p += 0.060 * (1 - dw / 5);       // 水边加密
         const nz = noise(x, z);
-        if (nz > 0.64) p += 0.34 * (nz - 0.64) * 3;   // 树丛加密
-        p = Math.min(p, 0.44);
+        if (nz > 0.66) p += 0.18 * (nz - 0.66) * 3;   // 树丛加密
+        p = Math.min(p, 0.24);
         if (rnd() > p) continue;
 
         let type = 'camphor';
@@ -5661,8 +5759,22 @@ body.noui #stage::after{display:none}
             const swap = (h.facing === 'E' || h.facing === 'W');
             const mw = swap ? h.d : h.w, md = swap ? h.w : h.d;
             const type = h.type;
-            const m = variant('h:' + type + ':' + mw + ':' + md,
-              r2 => MODELS.house({ w: mw - 0.35, d: md - 0.35, type }, r2), 3);
+            // 每幢宅子给一点旧色/冷暖差：真实村落的白墙从不是同一个白
+            const TINT = [
+              null,
+              { r: 0.93, g: 0.93, b: 0.90 },   // 泛黄（旧石灰）
+              { r: 1.03, g: 1.02, b: 0.98 },   // 偏亮
+              { r: 0.97, g: 0.99, b: 1.03 }    // 泛青（返潮）
+            ];
+            const tb = (h.id * 7 + 3) % 4;
+            const m = variant('h:' + type + ':' + mw + ':' + md + ':' + tb,
+              r2 => {
+                GEO.setTint(TINT[tb]);
+                let g2 = null;
+                try { g2 = MODELS.house({ w: mw - 0.35, d: md - 0.35, type }, r2); }
+                finally { GEO.setTint(null); }
+                return g2;
+              }, 3);
             put(m, wx(cx), wz(cz), rot);
           }
         }],
@@ -6148,13 +6260,13 @@ body.noui #stage::after{display:none}
     const pos = geo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
     const c = new THREE.Color();
-    const cGrass = new THREE.Color(0x6b7550);
-    const cGrass2 = new THREE.Color(0x7a8557);
+    const cGrass = new THREE.Color(0x59603f);
+    const cGrass2 = new THREE.Color(0x68714a);
     const cMud = new THREE.Color(0x6b6350);
     const cRock = new THREE.Color(0x8e8c80);
-    const cHill = new THREE.Color(0x5f7345);
-    const cDry = new THREE.Color(0x9a9a62);
-    const cDirt = new THREE.Color(0x9c8e6e);
+    const cHill = new THREE.Color(0x4f6140);
+    const cDry = new THREE.Color(0x847f55);
+    const cDirt = new THREE.Color(0x8b7f66);
 
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i);
@@ -6213,8 +6325,8 @@ body.noui #stage::after{display:none}
         c.lerp(cDry, Math.max(0, n2 - 0.62) * 1.5);
         if (dw <= 3) c.lerp(cMud, 0.22 * (1 - dw / 4));
         if (k === 7) { c.multiplyScalar(0.70); c.lerp(new THREE.Color(0x424a36), 0.35); }
-        if (nearRoad) c.lerp(cDirt, 0.30);
-        if (nearHouse) c.lerp(cDirt, 0.16);
+        if (nearRoad) c.lerp(cDirt, 0.58);
+        if (nearHouse) c.lerp(cDirt, 0.44);
       }
       const n3 = Math.sin(x * 1.87 + z * 2.53) * Math.cos(x * 1.31 - z * 1.71);
       const n4 = Math.sin(x * 5.3 - z * 4.1) * Math.cos(x * 3.7 + z * 6.2);
@@ -6233,6 +6345,7 @@ body.noui #stage::after{display:none}
 
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.97, metalness: 0 });
     mat.envMapIntensity = 0.35;
+    if (GEO.detail) GEO.detail(mat, 'ground');
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
     mesh.castShadow = false;
@@ -6508,6 +6621,7 @@ body.noui #stage::after{display:none}
     g.computeVertexNormals();
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0 });
     mat.envMapIntensity = 0.50;
+    if (GEO.detail) GEO.detail(mat, 'stone');
     const m = new THREE.Mesh(g, mat);
     m.receiveShadow = true;
     scene.add(m);
@@ -7219,15 +7333,15 @@ body.noui #stage::after{display:none}
 
   // 现场调参：?exp=1.1&fog=0.0016&bloom=0.5&ao=0.8&sat=1.06&vig=0.86&grain=0.03&cloud=0.7
   const TUNE = {
-    exp: 1.04,
-    fog: 0.00085,
-    bloom: 0.34,
-    ao: 0.80,
-    sat: 1.12,
+    exp: 1.06,
+    fog: 0.00040,
+    bloom: 0.30,
+    ao: 0.86,
+    sat: 1.18,
     vig: 0.84,
-    grain: 0.028,
+    grain: 0.024,
     cloud: 0.75,
-    env: 0.52,
+    env: 0.44,
     letterbox: QS.get('lb') !== '0',
     sun: (function () {
       const s = QS.get('sun');
@@ -7443,8 +7557,8 @@ body.noui #stage::after{display:none}
     sc.left = -240; sc.right = 240; sc.top = 240; sc.bottom = -240;
     sc.near = 1; sc.far = 900;
     sc.updateProjectionMatrix();
-    sun.shadow.bias = -0.0006;
-    sun.shadow.normalBias = 0.06;
+    sun.shadow.bias = -0.0005;
+    sun.shadow.normalBias = 0.11;
     if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
     // target 必须在场景里，否则光线朝向可能不更新
     if (sun.target && sun.target.parent !== scene) scene.add(sun.target);
@@ -7539,7 +7653,7 @@ body.noui #stage::after{display:none}
         o.intensity = o.__base * (TUNE.sunonly ? 0.10 : 0.58);
       } else if (o.isDirectionalLight) {
         if (o.__base === undefined) o.__base = o.intensity;
-        o.intensity = o.__base * (o === sun ? 1.35 : 0.62);
+        o.intensity = o.__base * (o === sun ? 1.52 : 0.52);
       }
     });
     scene.traverse(function (o) {
@@ -8030,9 +8144,17 @@ body.noui #stage::after{display:none}
     const R = global.RENDER;
     if (!R || !R.cam) return;
     const c = R.cam;
-    if (QS.get('view')) return;
-    c._phi = 0.70; c._dist = 98;
-    c.phi = 0.70; c.dist = 98;
+    // cinema 自己当摄影指导：不管 ?view 给的是哪一档，都按电影构图重新取景
+    const FR = {
+      wide:  [0.64, 146],
+      over:  [0.17, 300],
+      water: [1.02, 104],
+      close: [1.02, 24]
+    };
+    const v = QS.get('view') || 'wide';
+    const f = FR[v] || FR.wide;
+    c._phi = f[0]; c._dist = f[1];
+    c.phi = f[0]; c.dist = f[1];
     c.minPhi = Math.min(c.minPhi, 0.12);
   }
 
@@ -8422,8 +8544,8 @@ body.noui #stage::after{display:none}
     '  float sunAmt = pow(max(dot(vd, sdir), 0.0), 7.0);',
     '  vec3 fogC = uFogColor * (1.0 + sunAmt * 0.55) + uSunColor * sunAmt * 0.22;',
     '  if (uDbg == 8.0) { gl_FragColor = vec4(fogC, 1.0); return; }',
-    '  if (uDbg == 10.0) { gl_FragColor = vec4(mix(c, fogC, clamp(fog, 0.0, 0.92)), 1.0); return; }',
-    '  c = mix(c, fogC, clamp(fog, 0.0, 0.92));',
+    '  if (uDbg == 10.0) { gl_FragColor = vec4(mix(c, fogC, clamp(fog, 0.0, 0.55)), 1.0); return; }',
+    '  c = mix(c, fogC, clamp(fog, 0.0, 0.55));',
     '  // --- bloom',
     '  if (uBloom > 0.0) {',
     '    vec3 b = texture2D(tBloom, uv).rgb;',
@@ -8435,11 +8557,13 @@ body.noui #stage::after{display:none}
     '  c = aces(c);',
     '  // lift / gamma / gain 三段调色',
     '  c = pow(max(c, 0.0), vec3(0.96, 1.0, 1.04));',
-    '  c = c * 0.94 + 0.028;',
+    '  c = c * 0.97 + 0.008;',
+    '  // S 形对比：把中灰推开，暗部沉下去，白墙才立得起来',
+    '  c = mix(c, c * c * (3.0 - 2.0 * c), 0.22);',
     '  // 分色：暗部偏青，亮部偏暖',
     '  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));',
-    '  vec3 shadowTint = vec3(0.92, 1.00, 1.10);',
-    '  vec3 highTint = vec3(1.07, 1.01, 0.92);',
+    '  vec3 shadowTint = vec3(0.88, 0.98, 1.13);',
+    '  vec3 highTint = vec3(1.10, 1.02, 0.90);',
     '  c *= mix(shadowTint, highTint, smoothstep(0.10, 0.85, lum));',
     '  // 饱和度',
     '  c = mix(vec3(lum), c, uSat);',
