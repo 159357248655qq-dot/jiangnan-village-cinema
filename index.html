@@ -269,9 +269,9 @@ body.noui #stage::after{display:none}
     stoneLight:  0xb3b0a4,
     stoneWet:    0x82837a,
     // 植被
-    leaf:        0x51663f,
-    leafDark:    0x35462c,
-    leafLight:   0x738752,
+    leaf:        0x3d5030,
+    leafDark:    0x222e1c,
+    leafLight:   0x5a6d3c,
     leafAutumn:  0x8b7c46,
     bamboo:      0x5d6e42,
     trunk:       0x5c4a3a,
@@ -574,7 +574,7 @@ body.noui #stage::after{display:none}
       MAT_LEAF.onBeforeCompile = (sh) => {
         sh.fragmentShader = sh.fragmentShader.replace(
           '#include <lights_fragment_end>',
-          '#include <lights_fragment_end>\n  reflectedLight.indirectDiffuse += diffuseColor.rgb * 0.58;\n  // fake 透光：叶背也要亮，否则逆光树冠全是黑块\n  reflectedLight.directDiffuse += diffuseColor.rgb * 0.42;'
+          '#include <lights_fragment_end>\n  reflectedLight.indirectDiffuse += diffuseColor.rgb * 0.46;\n  // fake 透光：叶背也要亮，否则逆光树冠全是黑块\n  reflectedLight.directDiffuse += diffuseColor.rgb * 0.26;'
         );
       };
       MAT_LEAF.customProgramCacheKey = () => 'leaf';
@@ -1604,6 +1604,73 @@ body.noui #stage::after{display:none}
       bx(g, bw + 0.13, 0.085, bd + 0.13, C.stone, 0, podH + 0.565, 0, 0.04);
     }
 
+    /* 单坡披檐：贴着某面山墙/背墙加一道向外下倾的窄檐。
+       真实的村里几乎每面朝天的墙都有这么一道，屋檐下才不是一块悬空的平墙。
+       nx/nz 指墙的外法线（只允许一个非零），along0~along1 是檐口沿墙方向的范围。 */
+    function pentAt(nx, nz, a0, a1, yTop, out) {
+      var upY = yTop + 0.20;
+      var p0, p1, p2, p3, nOut;
+      if (nx !== 0) {
+        p0 = [nx * hw, upY, a0];
+        p1 = [nx * hw, upY, a1];
+        p2 = [nx * (hw + out), yTop, a1];
+        p3 = [nx * (hw + out), yTop, a0];
+        nOut = [nx * 0.55, 0.84, 0];
+      } else {
+        p0 = [a0, upY, nz * hd];
+        p1 = [a1, upY, nz * hd];
+        p2 = [a1, yTop, nz * (hd + out)];
+        p3 = [a0, yTop, nz * (hd + out)];
+        nOut = [0, 0.84, nz * 0.55];
+      }
+      g.add(faceQuad(G, p0, p1, p2, p3, C.tile, nOut, 0.05));
+      g.add(faceQuad(G,
+        [p0[0], p0[1] - 0.07, p0[2]], [p1[0], p1[1] - 0.07, p1[2]],
+        [p2[0], p2[1] - 0.07, p2[2]], [p3[0], p3[1] - 0.07, p3[2]],
+        C.woodDark, [0, -1, 0], 0.03));
+      /* 檐口封边 + 两根斜撑 */
+      var mid = (a0 + a1) / 2, len = Math.abs(a1 - a0);
+      if (nx !== 0) {
+        bx(g, 0.075, 0.13, len, C.tileDark, nx * (hw + out), yTop - 0.055, mid, 0.03);
+        bx(g, out * 0.92, 0.075, 0.10, C.woodDark, nx * (hw + out * 0.48), yTop + 0.06, a0 + len * 0.22, 0.03);
+        bx(g, out * 0.92, 0.075, 0.10, C.woodDark, nx * (hw + out * 0.48), yTop + 0.06, a1 - len * 0.22, 0.03);
+      } else {
+        bx(g, len, 0.13, 0.075, C.tileDark, mid, yTop - 0.055, nz * (hd + out), 0.03);
+        bx(g, 0.10, 0.075, out * 0.92, C.woodDark, a0 + len * 0.22, yTop + 0.06, nz * (hd + out * 0.48), 0.03);
+        bx(g, 0.10, 0.075, out * 0.92, C.woodDark, a1 - len * 0.22, yTop + 0.06, nz * (hd + out * 0.48), 0.03);
+      }
+    }
+
+    /* 门前的石踏步：白墙贴地、门前没有台阶，房子就还是"插"在地里 */
+    function doorSteps() {
+      var sw = Math.min(2.05, bodyW * 0.30);
+      bx(g, sw, 0.15, 0.34, C.stoneLight, 0, 0.075, hd + 0.16, 0.05);
+      bx(g, sw * 0.82, 0.14, 0.30, C.stone, 0, 0.215, hd + 0.11, 0.05);
+    }
+
+    /* 按随机数给这幢房子加披檐：0 无 / 1 一道 / 2 两道 / 3 三道 */
+    function dressHouse() {
+      var style = (R() < 0.34) ? 0 : 1 + ((R() * 3) | 0);
+      if (eaveY < 3.15) style = Math.min(style, 1);
+      var out = fr(0.58, 0.82);
+      var yA = Math.max(2.30, eaveY - 0.62);
+      var sides = [];
+      if (style >= 1) sides.push('R');
+      if (style >= 2) sides.push('L');
+      if (style >= 3) sides.push('B');
+      for (var i = 0; i < sides.length; i++) {
+        var s = sides[i];
+        var span = (s === 'B') ? (bodyW * 0.5) : (bodyD * 0.5);
+        var a0 = -span + fr(0.10, 0.55);
+        var a1 = span - fr(0.10, 0.55);
+        if (a1 - a0 < 1.1) continue;
+        if (s === 'R') pentAt(1, 0, a0, a1, yA + fr(-0.06, 0.10), out);
+        else if (s === 'L') pentAt(-1, 0, a0, a1, yA + fr(-0.06, 0.10), out);
+        else pentAt(0, -1, a0, a1, yA + fr(-0.06, 0.10), out);
+      }
+      doorSteps();
+    }
+
     function makeRh(bd) {
       var hd2 = bd / 2 + rOver;
       return Math.max(1.62, Math.min(3.0, hd2 * fr(0.64, 0.74)));
@@ -1840,6 +1907,7 @@ body.noui #stage::after{display:none}
       sideBackWindows(bodyW, bodyD);
     }
 
+    dressHouse();
     return g;
   };
 })();
@@ -2888,14 +2956,15 @@ body.noui #stage::after{display:none}
   /* 冠层取色：下暗上亮，偶带秋意 */
   function canopyCol(t, rnd, warm) {
     let col;
-    if (t < 0.42) col = mix(C.leafDark, C.leaf, t / 0.42);
-    else col = mix(C.leaf, C.leafLight, Math.pow((t - 0.42) / 0.58, 0.72));
+    const tt = Math.pow(Math.max(0, t), 1.35);
+    if (tt < 0.42) col = mix(C.leafDark, C.leaf, tt / 0.42);
+    else col = mix(C.leaf, C.leafLight, Math.pow((tt - 0.42) / 0.58, 0.85));
     if (warm) col = mix(col, C.leafAutumn, warm * rnd() * 0.24);
     // 树冠整体提亮一档：远看才不是一团黑绿（必须回 hex，否则 setHex 得到 NaN -> 黑块）
     const _c3 = new THREE.Color(col);
-    _c3.r = Math.min(1, _c3.r * 1.06);
-    _c3.g = Math.min(1, _c3.g * 1.06);
-    _c3.b = Math.min(1, _c3.b * 1.06);
+    _c3.r = Math.min(1, _c3.r * 0.98);
+    _c3.g = Math.min(1, _c3.g * 0.98);
+    _c3.b = Math.min(1, _c3.b * 0.98);
     return _c3.getHex();
   }
 
@@ -2981,7 +3050,7 @@ body.noui #stage::after{display:none}
       shellCard(g, cx, cy, cz, rr, _sd, w, w * (0.66 + rnd() * 0.26), col, rnd() * 6.28318);
     }
     // 内层：朝内偏暗，堵住穿视
-    const ni = Math.max(2, Math.round(n * 0.18));
+    const ni = Math.max(3, Math.round(n * 0.42));
     for (let i = 0; i < ni; i++) {
       const u = rnd() * 2 - 1, th = rnd() * 6.28318;
       const sq = Math.sqrt(1 - u * u);
@@ -5211,6 +5280,7 @@ body.noui #stage::after{display:none}
   }
 
   /* ---------------- 生成器 ---------------- */
+  let lastMeta = null;
   function generate(seed) {
     const rnd = GEO.rng(seed >>> 0);
     const R = (a, b) => a + rnd() * (b - a);
@@ -5675,6 +5745,7 @@ body.noui #stage::after{display:none}
     meta.kind = kind;
     meta.distW = distW;
     meta.validate = () => validate(meta, kind, distW);
+    lastMeta = meta;
     return meta;
   }
 
@@ -5897,6 +5968,68 @@ body.noui #stage::after{display:none}
                 wallAt(fx, cz, gap, false);
               }
             }
+          }
+        }],
+        ['添物', () => {
+          /* 生活道具层：门口的水缸、柴堆、晾衣竿、石凳。
+             村子此前"刚建完没人住"，缺的就是这一层人味。全部贴着墙放，不进巷道。 */
+          const fr2 = (a, b) => a + (b - a) * rnd();
+          for (const h of meta.houses) {
+            const swap = (h.facing === 'E' || h.facing === 'W');
+            const mw = swap ? h.d : h.w, md = swap ? h.w : h.d;
+            const cx = (h.x0 + h.x1 + 1) / 2, cz = (h.z0 + h.z1 + 1) / 2;
+            const g2 = new THREE.Group();
+            const zf = md / 2 + 0.52;
+            let n = 0;
+            /* 水缸：几乎每家都有 */
+            if (rnd() < 0.78) {
+              const jx = (rnd() < 0.5 ? -1 : 1) * (mw * fr2(0.26, 0.40));
+              const jr = 0.26 + rnd() * 0.07;
+              g2.add(GEO.cyl(jr, jr * 0.82, 0.56, 12, 0x4a4640, { x: jx, y: 0.28, z: zf }));
+              g2.add(GEO.cyl(jr * 1.10, jr * 1.10, 0.075, 12, 0x3c3934, { x: jx, y: 0.58, z: zf }));
+              g2.add(GEO.cyl(jr * 0.86, jr * 0.86, 0.02, 12, 0x22282a, { x: jx, y: 0.545, z: zf }));
+              n++;
+            }
+            /* 柴堆：靠墙码的三四根短柴 */
+            if (n < 2 && rnd() < 0.42) {
+              const rx = (rnd() < 0.5 ? -1 : 1) * (mw * fr2(0.10, 0.26));
+              for (let li = 0; li < 4; li++) {
+                const ly = 0.09 + (li >> 1) * 0.17;
+                const lz = zf - 0.16 + (li % 2) * 0.20 + rnd() * 0.05;
+                const m = GEO.cyl(0.075 + rnd() * 0.02, 0.075 + rnd() * 0.02, 0.86, 7,
+                  (li % 2 ? 0x6d5b45 : 0x7a6750), { x: rx, y: ly, z: lz });
+                m.rotation.z = Math.PI / 2;
+                m.rotation.y = (rnd() - 0.5) * 0.30;
+                g2.add(m);
+              }
+              n++;
+            }
+            /* 晾衣竿：两根竹竿 + 横杆 + 三块布 */
+            if (n < 2 && rnd() < 0.34) {
+              const ry = 1.92 + rnd() * 0.30;
+              const half = Math.min(1.5, mw * 0.30);
+              for (const s of [-1, 1]) {
+                g2.add(GEO.cyl(0.035, 0.042, ry, 6, 0x8d7f5e, { x: s * half, y: ry / 2, z: zf - 0.12 }));
+              }
+              const bar = GEO.cyl(0.030, 0.030, half * 2 + 0.12, 6, 0x8d7f5e, { y: ry - 0.04, z: zf - 0.12 });
+              bar.rotation.z = Math.PI / 2;
+              g2.add(bar);
+              for (let ci = 0; ci < 3; ci++) {
+                const cw = 0.30 + rnd() * 0.22;
+                g2.add(GEO.box(cw, 0.52 + rnd() * 0.30, 0.022,
+                  [0xdfe3e0, 0xc9cfc9, 0x9fb0bd][ci % 3],
+                  { x: -half + 0.28 + ci * (half * 2 - 0.5) / 3, y: ry - 0.34, z: zf - 0.12, jitter: 0.03 }));
+              }
+              n++;
+            }
+            /* 石凳 / 石磨盘 */
+            if (n < 2 && rnd() < 0.36) {
+              const sx = (rnd() < 0.5 ? -1 : 1) * (mw * fr2(0.16, 0.34));
+              g2.add(GEO.box(0.62, 0.14, 0.30, C.stoneLight, { x: sx, y: 0.40, z: zf - 0.05 }));
+              g2.add(GEO.box(0.16, 0.34, 0.24, C.stone, { x: sx - 0.20, y: 0.17, z: zf - 0.05 }));
+              g2.add(GEO.box(0.16, 0.34, 0.24, C.stone, { x: sx + 0.20, y: 0.17, z: zf - 0.05 }));
+            }
+            if (g2.children.length) put(g2, wx(cx), wz(cz), faceRy[h.facing]);
           }
         }],
         ['建祠', () => {
@@ -6189,7 +6322,7 @@ body.noui #stage::after{display:none}
     });
   }
 
-  global.WORLD = { generate, build, N, K };
+  global.WORLD = { generate, build, N, K, get meta() { return lastMeta; } };
 })(window);
 
 </script>
@@ -6364,9 +6497,9 @@ body.noui #stage::after{display:none}
       else if (dw === 2) y = -0.22;
       else y = 0;
 
-      const ex = Math.max(0, Math.abs(x) - (N / 2 - 13));
-      const ez = Math.max(0, Math.abs(z) - (N / 2 - 13));
-      const e = Math.max(ex, ez) / 13;
+      const ex = Math.max(0, Math.abs(x) - (N / 2 - 15));
+      const ez = Math.max(0, Math.abs(z) - (N / 2 - 15));
+      const e = Math.max(ex, ez) / 12;
       if (e > 0 && dw > 2) {
         const h = Math.pow(Math.min(e, 1.5), 1.55) * 10.5;
         const n = Math.sin(x * 0.14 + 1.7) * Math.cos(z * 0.12 - 0.6) * 2.2
@@ -6378,6 +6511,11 @@ body.noui #stage::after{display:none}
       }
       const edgeD = Math.min(x + N / 2, N / 2 - x, z + N / 2, N / 2 - z);
       if (dw > 2) y *= Math.min(1, Math.max(0, edgeD / 3));
+      /* 岛缘浸入水面：外圈 4.5 格平滑降到水下，方形边界藏进水里，岸线变成自然的弧 */
+      if (dw > 2) {
+        const sink = 1 - Math.min(1, Math.max(0, (edgeD - 1.2) / 4.5));
+        if (sink > 0) y = y * (1 - sink) + (-1.75) * sink;
+      }
 
       if (dw > 2) {
         if (k === 2 || k === 8 || k === 3 || k === 5 || k === 6 || k === 7) y = 0;
@@ -6689,11 +6827,11 @@ body.noui #stage::after{display:none}
     const joint = 0x86837a;
     const _c = new THREE.Color();
 
-    function quad(x, z, s, y, hex) {
-      const a = s / 2;
+    function qrect(x, z, w, d, y, hex) {
+      const ax = w / 2, az = d / 2;
       const p = [
-        x + a, y, z + a, x + a, y, z - a, x - a, y, z - a,
-        x + a, y, z + a, x - a, y, z - a, x - a, y, z + a
+        x + ax, y, z + az, x + ax, y, z - az, x - ax, y, z - az,
+        x + ax, y, z + az, x - ax, y, z - az, x - ax, y, z + az
       ];
       _c.setHex(hex).convertSRGBToLinear();
       for (let i = 0; i < 6; i++) {
@@ -6702,15 +6840,52 @@ body.noui #stage::after{display:none}
       }
     }
 
+    /* 石板：整格石板太大、太平，一块挨一块像铺地砖。
+       按格号决定切成一块 / 两块 / 四块，每块给一点高差和冷暖差，
+       缝里再长几簇苔草——尺度一细，"Minecraft 地板"的感觉就散了。 */
+    const mossC = [0x4a5733, 0x556236, 0x3f4d2c, 0x5d6a3d];
+    const slabsWarm = [0xa8a294, 0xb0a898, 0x9c9686];
+    const slabsCool = [0x8f948c, 0x9a9d94, 0x878b84];
+
+    function paveCell(wx0, wz0, x, z) {
+      const mode = (x * 5 + z * 11 + ((x * z) % 7)) % 4;
+      const baseY = 0.078 + (((x * 13 + z * 7) % 5) - 2) * 0.0022;
+      const warm = ((x * 17 + z * 29) % 10) < 4;
+      const pal = warm ? slabsWarm : slabsCool;
+      const jj = 0.055;
+      if (mode === 0 || mode === 3) {
+        const w = 0.88 - ((x * 3 + z * 5) % 4) * 0.02;
+        qrect(wx0, wz0, w, w, baseY, pal[(x + z * 3) % 3]);
+      } else if (mode === 1) {
+        const sw = (0.88 - jj) / 2;
+        qrect(wx0 - (sw + jj) / 2, wz0, sw, 0.88, baseY, pal[(x * 2 + z) % 3]);
+        qrect(wx0 + (sw + jj) / 2, wz0, sw, 0.88, baseY + 0.0016, pal[(x + z * 2) % 3]);
+      } else {
+        const sw = (0.88 - jj) / 2;
+        qrect(wx0 - (sw + jj) / 2, wz0 - (sw + jj) / 2, sw, sw, baseY, pal[(x + z) % 3]);
+        qrect(wx0 + (sw + jj) / 2, wz0 - (sw + jj) / 2, sw, sw, baseY + 0.0014, pal[(x * 3 + z) % 3]);
+        qrect(wx0 - (sw + jj) / 2, wz0 + (sw + jj) / 2, sw, sw, baseY + 0.0026, pal[(x + z * 3) % 3]);
+        qrect(wx0 + (sw + jj) / 2, wz0 + (sw + jj) / 2, sw, sw, baseY + 0.0009, pal[(x * 2 + z * 5) % 3]);
+      }
+      /* 缝里的苔与草：沿石板缝长出的小块 */
+      if (((x * 31 + z * 19) % 100) < 17) {
+        const mn = 1 + ((x + z) % 2);
+        for (let mi = 0; mi < mn; mi++) {
+          const mx = wx0 + (((x * 7 + mi * 13) % 9) - 4) * 0.085;
+          const mz = wz0 + (((z * 11 + mi * 5) % 9) - 4) * 0.085;
+          const ms = 0.085 + ((x * 3 + mi) % 4) * 0.03;
+          qrect(mx, mz, ms, ms * 0.75, baseY + 0.011, mossC[(x + z + mi) % 4]);
+        }
+      }
+    }
+
     for (let z = 0; z < N; z++) {
       for (let x = 0; x < N; x++) {
         const k = kind[z * N + x];
         if (k !== 2 && k !== 8) continue;
         const wx0 = x - N / 2 + 0.5, wz0 = z - N / 2 + 0.5;
-        quad(wx0, wz0, 1.04, 0.070, joint);
-        const h = ((x * 7 + z * 13) % 5);
-        const ins = 0.88 + ((x * 3 + z * 5) % 4) * 0.02;
-        quad(wx0, wz0, ins, 0.082, slabs[h]);
+        qrect(wx0, wz0, 1.04, 1.04, 0.070, joint);
+        paveCell(wx0, wz0, x, z);
         // 路缘石：与非路相邻处立一道边
         const isRd = (xx, zz) => (xx >= 0 && zz >= 0 && xx < N && zz < N)
           ? (kind[zz * N + xx] === 2 || kind[zz * N + xx] === 8) : false;
@@ -6791,10 +6966,10 @@ body.noui #stage::after{display:none}
     const POS = [], COL = [];
     const _c = new THREE.Color();
     const bands = [
-      [0, -0.34, 0x7f7d54],     // 草根土
-      [-0.34, -0.72, 0x94896e], // 干沙
-      [-0.72, -1.30, 0x6d6455], // 湿沙
-      [-1.30, -6.20, 0x453d34]  // 水下暗影
+      [-1.20, -1.70, 0x3f4a3a],  // 水下草土（整圈藏到水面以下，露出水面的那条直边就没了）
+      [-1.70, -2.45, 0x2f3d38],  // 暗沙
+      [-2.45, -4.10, 0x22312f],  // 深滩
+      [-4.10, -6.20, 0x18292a]   // 水下暗影
     ];
     // 外挑系数：原来裙边是「向内收」的台面侧壁（一个 6 单位高的直切面），
     // 低机位一看就是一块被切下来的方蛋糕。改成向外铺开的浅滩，
@@ -7458,7 +7633,7 @@ body.noui #stage::after{display:none}
     fog: 0.00040,
     bloom: 0.32,
     ao: 0.64,
-    sat: 1.26,
+    sat: 1.15,
     vig: 0.90,
     grain: 0.024,
     cloud: 0.75,
@@ -8175,17 +8350,22 @@ body.noui #stage::after{display:none}
     '  vec3 d = vW - cameraPosition;',
     '  float dist = length(d);',
     '  vec3 dir = d / max(dist, 1e-4);',
-    '  float t1 = smoothstep(115.0, 520.0, dist);',
-    '  float t2 = smoothstep(300.0, 700.0, dist);',
-    '  vec3 col = mix(uDeep, uHaze * 0.72, t1);',
+    '  float t1 = smoothstep(150.0, 620.0, dist);',
+    '  float t2 = smoothstep(520.0, 1150.0, dist);',
+    '  vec3 col = mix(uDeep, uHaze * 0.58, t1);',
     '  col = mix(col, uHaze * 0.88, t2);',
     '  float graze = clamp(1.0 - abs(dir.y) * 2.6, 0.0, 1.0);',
     '  col = mix(col, uHaze * 1.04, graze * 0.34 * t1);',
     '  vec3 sd = normalize(uSunDir + vec3(1e-4, 1e-4, 1e-4));',
     '  float sunAmt = pow(max(dot(dir, sd), 0.0), 6.0);',
     '  col += uHaze * sunAmt * 0.22;',
+    '  float hzn = smoothstep(420.0, 1050.0, dist);',
+    '  col = mix(col, uHaze * 1.10, hzn * 0.80);',
     '  float br = sin(vW.x * 0.012 + uTime * 0.18) * sin(vW.z * 0.011 - uTime * 0.13);',
     '  col *= 1.0 + br * 0.012 * t1;',
+    '  float rp = sin(vW.x * 0.085 + vW.z * 0.021 + uTime * 0.33) * sin(vW.z * 0.104 - uTime * 0.21 + 1.7);',
+    '  rp = smoothstep(0.30, 0.98, rp * 0.5 + 0.5);',
+    '  col *= 1.0 + rp * 0.17 * (1.0 - t1);',
     '  gl_FragColor = vec4(col, 1.0);',
     '}'
   ].join('\n');
@@ -8193,7 +8373,7 @@ body.noui #stage::after{display:none}
   function refreshSea() {
     if (!scene) return;
     const fc = (scene.fog && scene.fog.color) ? scene.fog.color : new THREE.Color(0xcfd8ce);
-    const deep = new THREE.Color(0x1b2f32).convertSRGBToLinear();
+    const deep = new THREE.Color(0x203c43).convertSRGBToLinear();
     const haze = new THREE.Color().copy(fc).lerp(new THREE.Color(0xfdfaf1), 0.12).convertSRGBToLinear();
     let gp = scene.getObjectByName('cine-ground');
     if (!gp) {
@@ -8392,8 +8572,11 @@ body.noui #stage::after{display:none}
     };
     const v = QS.get('view') || 'wide';
     const f = FR[v] || FR.wide;
-    c._phi = f[0]; c._dist = f[1];
-    c.phi = f[0]; c.dist = f[1];
+    const zoom = parseFloat(QS.get('zoom') || '1') || 1;
+    c._phi = f[0]; c._dist = f[1] * zoom;
+    c.phi = f[0]; c.dist = f[1] * zoom;
+    const camY = parseFloat(QS.get('camY') || '0');
+    if (camY) { c.target.y = camY; if (c._tgt) c._tgt.y = camY; }
     c.minPhi = Math.min(c.minPhi, 0.12);
   }
 
