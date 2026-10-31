@@ -981,9 +981,12 @@ body.noui #stage::after{display:none}
       let mat = obj.material;
       let cls = 'default';
       if (mat === MAT || mat === MAT_FLAT) {
-        const ca = obj.geometry.attributes.color;
-        if (ca && ca.count) cls = classify(ca.getX(0), ca.getY(0), ca.getZ(0));
-        mat = surfMat(cls);
+        if (opts.mat) { mat = opts.mat; }        // 生命体：整只一个材质，避免按颜色拆成 2-3 个 draw call
+        else {
+          const ca = obj.geometry.attributes.color;
+          if (ca && ca.count) cls = classify(ca.getX(0), ca.getY(0), ca.getZ(0));
+          mat = surfMat(cls);
+        }
       }
       let b = buckets.get(mat.uuid);
       if (!b) { b = { mat, list: [], verts: 0 }; buckets.set(mat.uuid, b); }
@@ -1094,7 +1097,7 @@ body.noui #stage::after{display:none}
   global.GEO = {
     C, MAT, MAT_GLOW, MAT_FLAT, MAT_LEAF, mesh, box, cyl, slab, beam, quad,
     roof, pyramidRoof, matouWall, lattice, stairs, railing,
-    paint, mergeStatic, rng: mulberry32, leafCard, leafMaterial, leafTexture, MAT_ROOF, roofTexture, quadUV
+    paint, mergeStatic, surfMat, rng: mulberry32, leafCard, leafMaterial, leafTexture, MAT_ROOF, roofTexture, quadUV
   };
   global.C = C;
 })(window);
@@ -5649,6 +5652,7 @@ body.noui #stage::after{display:none}
 
       const faceRy = { N: Math.PI, S: 0, E: Math.PI / 2, W: -Math.PI / 2 };
 
+      const lifeActors = [];   // 可动生命：村民/家禽/牲畜，不并入静态合并网格
       const stages = [
         ['立宅', () => {
           for (const h of meta.houses) {
@@ -5809,19 +5813,19 @@ body.noui #stage::after{display:none}
           };
 
           // 村民：路上往来
-          const nv = 40 + Math.floor(rr() * 14);
+          const nv = 26 + Math.floor(rr() * 8);
           for (let i = 0; i < nv && roads.length; i++) {
             const c = at(roads);
             const m = MODELS.villager({ pose: Math.floor(rr() * 3) }, rnd);
             m.position.set(wx(c[0] + 0.5 + (rr() - 0.5) * 0.5), 0, wz(c[1] + 0.5 + (rr() - 0.5) * 0.5));
-            group.add(m);
+            lifeActors.push({ model: m, t: 'villager', mode: 'walk', grid: 'road' });
           }
           // 埠头 / 桥头 / 牌坊 前的聚集人群
           const crowd = (cx, cz, n, spread) => {
             for (let i = 0; i < n; i++) {
               const m = MODELS.villager({ pose: Math.floor(rr() * 3) }, rnd);
               m.position.set(cx + (rr() - 0.5) * spread, 0, cz + (rr() - 0.5) * spread);
-              group.add(m);
+              lifeActors.push({ model: m, t: 'villager', mode: 'idle', grid: 'road' });
             }
           };
           for (const d of meta.docks) crowd(wx(d.x) + 0.6, wz(d.z) + 0.6, 2 + Math.floor(rr() * 2), 1.2);
@@ -5835,13 +5839,13 @@ body.noui #stage::after{display:none}
           }
           // 家禽：宅边
           const hh = empties.filter(c => nearHouse(c[0], c[1]));
-          for (let i = 0; i < 14 && hh.length; i++) {
+          for (let i = 0; i < 8 && hh.length; i++) {
             const c = at(hh);
             const n = 2 + Math.floor(rr() * 3);
             for (let k = 0; k < n; k++) {
               const m = MODELS.animal('chicken', rnd);
               m.position.set(wx(c[0] + 0.5 + (rr() - 0.5) * 0.9), 0, wz(c[1] + 0.5 + (rr() - 0.5) * 0.9));
-              group.add(m);
+              lifeActors.push({ model: m, t: 'chicken', mode: 'peck', grid: 'empty', range: 2 });
             }
           }
           // 鸭鹅：水上近岸
@@ -5849,13 +5853,13 @@ body.noui #stage::after{display:none}
             const x = c[0], z = c[1];
             return kd[z * N2 + x - 1] !== 1 || kd[z * N2 + x + 1] !== 1 || kd[(z - 1) * N2 + x] !== 1 || kd[(z + 1) * N2 + x] !== 1;
           });
-          for (let i = 0; i < 12 && wnear.length; i++) {
+          for (let i = 0; i < 8 && wnear.length; i++) {
             const c = at(wnear);
             const n = 2 + Math.floor(rr() * 3);
             for (let k = 0; k < n; k++) {
               const m = MODELS.animal('duck', rnd);
               m.position.set(wx(c[0] + 0.5 + (rr() - 0.5) * 1.4), -0.36, wz(c[1] + 0.5 + (rr() - 0.5) * 1.4));
-              group.add(m);
+              lifeActors.push({ model: m, t: 'duck', mode: 'swim', grid: 'water', y: -0.36 });
             }
           }
           // 狗
@@ -5863,14 +5867,14 @@ body.noui #stage::after{display:none}
             const c = at(roads);
             const m = MODELS.animal('dog', rnd);
             m.position.set(wx(c[0] + 0.5), 0, wz(c[1] + 0.5));
-            group.add(m);
+            lifeActors.push({ model: m, t: 'dog', mode: 'walk', grid: 'road' });
           }
           // 水牛：田里
           for (let i = 0; i < 3 && fields.length; i++) {
             const c = at(fields);
             const m = MODELS.animal('buffalo', rnd);
             m.position.set(wx(c[0] + 0.5), -0.2, wz(c[1] + 0.5));
-            group.add(m);
+            lifeActors.push({ model: m, t: 'buffalo', mode: 'graze', grid: 'field', y: -0.2 });
           }
           // 白鹭：水边
           const shore = empties.filter(c => nearWater(c[0], c[1]));
@@ -5878,7 +5882,7 @@ body.noui #stage::after{display:none}
             const c = at(shore);
             const m = MODELS.animal('egret', rnd);
             m.position.set(wx(c[0] + 0.5), 0, wz(c[1] + 0.5));
-            group.add(m);
+            lifeActors.push({ model: m, t: 'egret', mode: 'idle', grid: 'shore', range: 2 });
           }
         }],
         ['点苔', () => {
@@ -5941,6 +5945,40 @@ body.noui #stage::after{display:none}
             try {
               const merged = GEO.mergeStatic(group);
               merged.name = 'village-merged';
+
+              /* --- 生命层：每只个体单独合并成一个可动对象，不进静态网格 --- */
+              const lifeGrp = new THREE.Group();
+              lifeGrp.name = 'village-life';
+              const alive = [];
+              const climbMat = (GEO.surfMat && GEO.surfMat('plaster')) || null;
+              for (const a of lifeActors) {
+                try {
+                  const src = a.model;
+                  // 关键：合并会烘焙 matrixWorld，必须先归零，否则位置会被叠加两次
+                  const p = src.position.clone();
+                  src.position.set(0, 0, 0);
+                  src.rotation.set(0, 0, 0);
+                  const g2 = GEO.mergeStatic(src, { ao: true, mat: climbMat });
+                  const holder = new THREE.Group();
+                  holder.name = 'life-' + a.t;
+                  holder.add(g2);
+                  holder.position.set(p.x, a.y || 0, p.z);
+                  const gx = Math.round(p.x + N / 2 - 0.5);
+                  const gz = Math.round(p.z + N / 2 - 0.5);
+                  lifeGrp.add(holder);
+                  alive.push({
+                    h: holder, t: a.t, mode: a.mode, grid: a.grid,
+                    hx: gx, hz: gz,                     // 出生格，活动范围以它为心
+                    x: p.x, y: a.y || 0, z: p.z, range: a.range,
+                    tx: p.x, tz: p.z,
+                    dir: Math.random() * 6.28318,
+                    spdT: 0, wait: Math.random() * 2, phase: Math.random() * 6.28
+                  });
+                } catch (e) { }
+              }
+              scene.add(lifeGrp);
+              global.LIFE = { group: lifeGrp, actors: alive, kind: meta.kind, N: N, K: K };
+
               scene.add(merged);
               resolve(merged);
             } catch (e) { reject(e); }
@@ -7998,6 +8036,118 @@ body.noui #stage::after{display:none}
     c.minPhi = Math.min(c.minPhi, 0.12);
   }
 
+  /* ============ 生命层：村民与家禽牲畜逐帧驱动 ============
+     world.js 把每只个体单独合并成 holder（不进静态合并网格），
+     这里只做「格子级游走」：沿可通行格选下一个中心点，朝它走，
+     到点再选。不做寻路，因为路网是正交格，随机游走已经足够自然。 */
+  const LIFE_OFF = QS.get('life') === '0';
+  const LIFE_SPD = { villager: 0.62, dog: 0.90, duck: 0.22, buffalo: 0.10, chicken: 0.12, egret: 0.0 };
+  const LIFE_RANGE = { villager: 26, dog: 30, duck: 7, buffalo: 2, chicken: 2, egret: 1 };
+  let lifeT = 0;
+
+  function lifePass(L, t, x, z) {
+    const N = L.N;
+    if (x < 1 || z < 1 || x >= N - 1 || z >= N - 1) return false;
+    const k = L.kind[z * N + x];
+    if (t === 'duck') return k === 1;
+    if (t === 'buffalo') return k === 4;
+    if (t === 'chicken') return k === 0 || k === 2 || k === 4;
+    if (t === 'egret') return k === 0 || k === 4;
+    return k === 2 || k === 8;                 // 村民 / 狗：路与桥
+  }
+
+  function lifePick(a, L) {
+    const N = L.N;
+    const cx = Math.round(a.x + N / 2 - 0.5), cz = Math.round(a.z + N / 2 - 0.5);
+    const D = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    const opts = [];
+    for (let k = 0; k < 4; k++) {
+      const nx = cx + D[k][0], nz = cz + D[k][1];
+      if (!lifePass(L, a.t, nx, nz)) continue;
+      if (Math.abs(nx - a.hx) + Math.abs(nz - a.hz) > a.range) continue;
+      let w = 1;
+      if (a.dx === -D[k][0] && a.dz === -D[k][1]) w = 0.16;   // 别立刻折返
+      opts.push([nx, nz, w, D[k][0], D[k][1]]);
+    }
+    if (!opts.length) { a.wait = 1.2 + Math.random() * 2.4; a.spdT = 0; return; }
+    let tot = 0; for (const o of opts) tot += o[2];
+    let r = Math.random() * tot, q = opts[0];
+    for (const o of opts) { r -= o[2]; if (r <= 0) { q = o; break; } }
+    a.tx = q[0] - N / 2 + 0.5;
+    a.tz = q[1] - N / 2 + 0.5;
+    a.dx = q[3]; a.dz = q[4];
+  }
+
+  function updateLife(dt) {
+    const L = global.LIFE;
+    if (LIFE_OFF || !L || !L.actors || !L.actors.length) return;
+    lifeT += dt;
+    for (let i = 0; i < L.actors.length; i++) {
+      const a = L.actors[i];
+      if (a.range === undefined) {
+        a.range = LIFE_RANGE[a.t] || 10;
+        a.dx = 0; a.dz = 0; a.spdT = 0; a.wait = a.wait || 0;
+        a.tx = a.x; a.tz = a.z;
+      }
+      const h = a.h;
+      const vmax = a.mode === 'idle' ? 0 : (LIFE_SPD[a.t] || 0.3);
+
+      if (a.mode === 'idle') {
+        a.idleT = (a.idleT || 0) + dt;
+        if (a.idleT > 3.5 + (a.phase % 4)) { a.idleT = 0; lifePick(a, L); }
+      }
+      if (a.wait > 0) {
+        a.wait -= dt;
+        a.spdT += (0 - a.spdT) * Math.min(1, dt * 6);
+        if (a.wait <= 0) lifePick(a, L);
+      } else {
+        const ddx = a.tx - a.x, ddz = a.tz - a.z;
+        const d = Math.hypot(ddx, ddz);
+        if (d < 0.08) {
+          a.wait = a.mode === 'idle' ? 2.5 + Math.random() * 4 : (a.t === 'villager' ? 0.3 + Math.random() * 1.8
+            : a.t === 'duck' ? 0.2 + Math.random() * 1.4
+              : a.t === 'buffalo' ? 2 + Math.random() * 5
+                : 0.4 + Math.random() * 2.0);
+          lifePick(a, L);
+        } else {
+          const want = Math.atan2(ddx, ddz);
+          let diff = want - a.dir;
+          while (diff > Math.PI) diff -= 6.28318;
+          while (diff < -Math.PI) diff += 6.28318;
+          a.dir += diff * Math.min(1, dt * 3.2);
+          a.spdT += (vmax - a.spdT) * Math.min(1, dt * 4);
+          const step = a.spdT * dt;
+          a.x += Math.sin(want) * step;
+          a.z += Math.cos(want) * step;
+        }
+      }
+
+      h.rotation.y = a.dir;
+      const sp = a.spdT;
+      if (a.t === 'villager') {
+        h.position.set(a.x, a.y + Math.abs(Math.sin(lifeT * 7.4 + a.phase)) * 0.030 * (sp > 0.06 ? 1 : 0.15), a.z);
+        h.rotation.z = Math.sin(lifeT * 7.4 + a.phase) * 0.035 * (sp > 0.06 ? 1 : 0);
+      } else if (a.t === 'duck') {
+        h.position.set(a.x, a.y + Math.sin(lifeT * 1.7 + a.phase) * 0.035, a.z);
+        h.rotation.z = Math.sin(lifeT * 1.1 + a.phase) * 0.05;
+      } else if (a.t === 'chicken') {
+        const peck = Math.max(0, Math.sin(lifeT * 2.3 + a.phase));
+        h.position.set(a.x, a.y + Math.abs(Math.sin(lifeT * 6.0 + a.phase)) * 0.014 * (sp > 0.02 ? 1 : 0), a.z);
+        h.rotation.x = peck * peck * peck * 0.42;
+      } else if (a.t === 'buffalo') {
+        h.position.set(a.x, a.y + Math.sin(lifeT * 0.9 + a.phase) * 0.012, a.z);
+        h.rotation.x = Math.max(0, Math.sin(lifeT * 0.42 + a.phase)) * 0.16;
+      } else if (a.t === 'egret') {
+        h.position.set(a.x, a.y + Math.sin(lifeT * 1.2 + a.phase) * 0.010, a.z);
+        h.rotation.x = Math.max(0, Math.sin(lifeT * 0.7 + a.phase)) * 0.10;
+      } else if (a.t === 'dog') {
+        h.position.set(a.x, a.y + Math.abs(Math.sin(lifeT * 10.0 + a.phase)) * 0.028 * (sp > 0.06 ? 1 : 0), a.z);
+      } else {
+        h.position.set(a.x, a.y, a.z);
+      }
+    }
+  }
+
   function frame() {
     if (!ready) { try { init(); } catch (e) { console.error('[CINE] init failed', e); ready = false; return fallback(); } }
     const dt = Math.min(clock.getDelta(), 0.05);
@@ -8030,6 +8180,7 @@ body.noui #stage::after{display:none}
     updateMotion(dt);
     applyMotion();
     animDecor(dt);
+    try { updateLife(dt); } catch (e) { }
     syncSky();
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
@@ -8332,6 +8483,7 @@ body.noui #stage::after{display:none}
   }
 
   global.CINE = {
+    step: updateLife,
     frame: function () {
       try { frame(); } catch (e) {
         console.error('[CINE] frame error', e);
