@@ -6055,7 +6055,7 @@ body.noui #stage::after{display:none}
     if (cam.auto) { cam._theta += dt * 0.013; }
     else {
       cam.idle += dt;
-      if (cam.idle > 7) cam.auto = true;
+      if (cam.idle > 45) cam.auto = true;   // 用户接管后 45 秒才恢复慢速环绕，避免「自己转走」
     }
     const k = 1 - Math.pow(0.0025, dt);
     cam.theta += (cam._theta - cam.theta) * k;
@@ -7168,7 +7168,7 @@ body.noui #stage::after{display:none}
   if (!CINE_ON) return;
 
   const Q = {
-    ss: isMobile ? 1.0 : 1.30,       // 超采样倍数
+    ss: isMobile ? 0.9 : 1.12,       // 超采样倍数
     ao: true,
     bloom: true,
     grain: true,
@@ -7214,6 +7214,7 @@ body.noui #stage::after{display:none}
   let stage = null;
   const clock = new THREE.Clock();
   let t = 0, frameNo = 0;
+  let perfAcc = 0, perfN = 0, lastFps = 0;
   let fadeIn = 0, t0 = (typeof performance !== 'undefined' ? performance.now() : 0);
   let adaptAcc = 0, adaptN = 0, adaptChecked = 0;
   let sunDirView = new THREE.Vector3();
@@ -7806,6 +7807,16 @@ body.noui #stage::after{display:none}
     return tex;
   }
 
+  let hudEl = null;
+  function makeHud() {
+    if (QS.get('hud') !== '1') return null;
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;right:10px;top:10px;z-index:99;padding:4px 8px;border-radius:4px;background:rgba(0,0,0,.55);color:#9fe;font:12px/1.4 ui-monospace,Consolas,monospace;pointer-events:none;';
+    d.textContent = '-';
+    document.body.appendChild(d);
+    return d;
+  }
+
   function makeLetterbox() {
     const m = 2.39;
     const mk = function (edge) {
@@ -7848,6 +7859,7 @@ body.noui #stage::after{display:none}
     scene.add(grp);
     deco = { group: grp, dust: null, mist: [], birds: [] };
 
+    try { hudEl = hudEl || makeHud(); } catch (e) { }
     if (TUNE.letterbox) { try { deco.lb = makeLetterbox(); } catch (e) { } }
 
     // 远景大地：让村庄坐进一片土地，而不是漂在虚空里
@@ -7877,7 +7889,7 @@ body.noui #stage::after{display:none}
       const gtex = new THREE.CanvasTexture(gc);
       gtex.encoding = THREE.sRGBEncoding;
       const gmat = new THREE.MeshBasicMaterial({ map: gtex, fog: true });
-      const gp = new THREE.Mesh(new THREE.CircleGeometry(1600, 72), gmat);
+      const gp = new THREE.Mesh(new THREE.CircleGeometry(1000, 64), gmat);
       gp.rotation.x = -Math.PI / 2;
       gp.position.y = -2.4;
       gp.renderOrder = -1;
@@ -7889,7 +7901,7 @@ body.noui #stage::after{display:none}
 
     // 空气中的浮尘（逆光里的小亮点）
     if (Q.dust) {
-      const N = Q.ss > 1.0 ? 900 : 380, pos = new Float32Array(N * 3);
+      const N = Q.ss > 1.0 ? 420 : 220, pos = new Float32Array(N * 3);
       for (let i = 0; i < N; i++) {
         pos[i * 3] = (Math.random() - 0.5) * 420;
         pos[i * 3 + 1] = 2 + Math.random() * 90;
@@ -7992,6 +8004,8 @@ body.noui #stage::after{display:none}
     t += dt;
     if (STILL) { t = 4.0; fadeIn = 1; } else { fadeIn = Math.min(1, Math.max(fadeIn + dt * 0.55, (performance.now() - t0) / 1500)); }
     frameNo++;
+    perfAcc += dt; perfN++;
+    if (perfN >= 30) { lastFps = Math.round(perfN / Math.max(perfAcc, 1e-4)); perfAcc = 0; perfN = 0; if (hudEl) hudEl.textContent = lastFps + ' fps · ' + SW + 'x' + SH; }
 
     // 缓冲尺寸跟随窗口（无头/首帧时 init 拿到的尺寸可能还不是最终值）
     if ((frameNo % 4) === 1) {
@@ -8001,9 +8015,11 @@ body.noui #stage::after{display:none}
 
     // 村庄合并网格每次重建后，重新挂投影（原实现整场景没开投影）
     // 注意：每次生成都可能在 init 之后才建好，所以要「找到前每帧都查」
-    if (scene && (!lastMerged || (frameNo % 30) === 0)) {
+    // 只在合并网格真的重建（对象被替换）时才重挂一遍；绝不能周期性重跑，
+    // 否则每 30 帧就把全场景材质 needsUpdate 一次 → 卡到没法拖拽。
+    if (scene) {
       const v = scene.getObjectByName('village-merged');
-      if (v && (v !== lastMerged || (frameNo % 30) === 0)) {
+      if (v && v !== lastMerged) {
         lastMerged = v;
         try { fixLights(); } catch (e) { }
         try { decorate(); } catch (e) { }
@@ -8306,7 +8322,7 @@ body.noui #stage::after{display:none}
     };
     window.__cineErr = errLog;
     setInterval(function () {
-      document.title = 'CINE ready=' + ready + ' t=' + t.toFixed(1) + ' fade=' + fadeIn.toFixed(2) +
+      document.title = 'CINE ready=' + ready + ' t=' + t.toFixed(1) + ' fps=' + lastFps + ' fade=' + fadeIn.toFixed(2) +
         ' SW=' + SW + 'x' + SH + ' err=' + (errLog.length ? errLog.length + ' errs' : 'none') +
         ' sky=' + (sky.mat ? 'Y' : 'N') + '/' + (sky.uSun ? sky.uSun.getHexString() : '-') +
         '/' + (sky.uFog ? sky.uFog.getHexString() : '-') +
