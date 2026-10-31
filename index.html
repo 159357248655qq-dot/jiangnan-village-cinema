@@ -7647,6 +7647,7 @@ body.noui #stage::after{display:none}
 
   const Q = {
     ss: isMobile ? 0.9 : 1.12,       // 超采样倍数
+    ssBase: isMobile ? 0.9 : 1.12,
     ao: true,
     bloom: true,
     grain: true,
@@ -7702,7 +7703,7 @@ body.noui #stage::after{display:none}
   let stage = null;
   const clock = new THREE.Clock();
   let t = 0, frameNo = 0;
-  let perfAcc = 0, perfN = 0, lastFps = 0;
+  let perfAcc = 0, perfN = 0, lastFps = 0, qDirty = false;
   let fadeIn = 0, t0 = (typeof performance !== 'undefined' ? performance.now() : 0);
   let adaptAcc = 0, adaptN = 0, adaptChecked = 0;
   let sunDirView = new THREE.Vector3();
@@ -8889,8 +8890,16 @@ body.noui #stage::after{display:none}
     if (STILL) { t = 4.0; fadeIn = 1; } else { fadeIn = Math.min(1, Math.max(fadeIn + dt * 0.55, (performance.now() - t0) / 1500)); }
     frameNo++;
     perfAcc += dt; perfN++;
-    if (perfN >= 30) { lastFps = Math.round(perfN / Math.max(perfAcc, 1e-4)); perfAcc = 0; perfN = 0; if (hudEl) hudEl.textContent = lastFps + ' fps · ' + SW + 'x' + SH; }
+    if (perfN >= 30) {
+      lastFps = Math.round(perfN / Math.max(perfAcc, 1e-4)); perfAcc = 0; perfN = 0;
+      if (hudEl) hudEl.textContent = lastFps + ' fps · ' + SW + 'x' + SH;
+      if (!QS.get('fixq') && ready && frameNo > 90) {
+        if (lastFps < 36 && Q.ss > 0.98) { Q.ss = 0.98; qDirty = true; }
+        else if (lastFps > 58 && Q.ss < Q.ssBase) { Q.ss = Q.ssBase; qDirty = true; }
+      }
+    }
 
+    if (qDirty) { qDirty = false; resize(); }
     // 缓冲尺寸跟随窗口（无头/首帧时 init 拿到的尺寸可能还不是最终值）
     if ((frameNo % 4) === 1) {
       renderer.getDrawingBufferSize(V2);
