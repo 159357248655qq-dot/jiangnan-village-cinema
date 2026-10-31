@@ -414,8 +414,10 @@ body.noui #stage::after{display:none}
           .replace('#include <color_fragment>', `#include <color_fragment>
           vec3 dW = dTriW(vWNrm);
           float dH = dHeight(vWPos, dW);
-          diffuseColor.rgb *= dAlbedo(vWPos, dW, dH);
-          float dRough = dRoughness(vWPos, dH);`)
+          // 细节只在近处生效：远处不做降采样会让高频噪声走样成一片沙点
+          float dLod = 1.0 / (1.0 + 0.055 * distance(vWPos, cameraPosition));
+          diffuseColor.rgb *= mix(vec3(1.0), dAlbedo(vWPos, dW, dH), dLod);
+          float dRough = dRoughness(vWPos, dH) * dLod;`)
           .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
           roughnessFactor = clamp(roughnessFactor + dRough, 0.05, 1.0);`)
           .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
@@ -7349,7 +7351,15 @@ body.noui #stage::after{display:none}
       const a = s.split(',').map(parseFloat);
       return (a.length === 3 && a.every(function (v) { return !isNaN(v); })) ? a : null;
     })(),
-    sunonly: QS.get('sunonly') === '1'
+    sunonly: QS.get('sunonly') === '1',
+    mood: (function () {
+      const s = QS.get('mood');
+      // 默认用夕照(2)：低角度暖光最能立住形体；?mood=0 晨雾 / 1 晴昼 / 3 烟雨
+      if (s === null) return 2;
+      if (s === '') return null;
+      const n = parseInt(s, 10);
+      return isNaN(n) ? null : n;
+    })()
   };
   ['exp', 'fog', 'bloom', 'ao', 'sat', 'vig', 'grain', 'cloud', 'env'].forEach(function (k) {
     const v = parseFloat(QS.get(k));
@@ -7413,7 +7423,7 @@ body.noui #stage::after{display:none}
     'uniform float uTime, uCloud;',
     'varying vec2 vUv;',
     'varying vec3 vDir;',
-    'float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }',
+    'float hash(vec2 p){ p = fract(p * vec2(0.1031, 0.1030)); p += dot(p, p.yx + 33.33); return fract((p.x + p.y) * p.x); }',
     'float noise(vec2 p){',
     '  vec2 i = floor(p), f = fract(p);',
     '  vec2 u = f*f*(3.0-2.0*f);',
@@ -7810,6 +7820,11 @@ body.noui #stage::after{display:none}
         try { onMood(i); } catch (e) { }
       };
     }
+
+    // ?mood=N 指定天光（0 晨雾 / 1 晴昼 / 2 夕照 / 3 烟雨）
+    if (TUNE.mood !== null && R.setMood) {
+      try { R.setMood(TUNE.mood); } catch (e) { }
+    }
   }
 
   function makeNoiseTex() {
@@ -7855,17 +7870,14 @@ body.noui #stage::after{display:none}
   function onMood(i) {
     syncSky();
     applySunPos();
-    // 天光切换后重新点亮阴影，并让环境光强度更“实”
-    if (scene && scene.environment) {
+    // setMood 会把各灯强度写回原始值，__base 已失效；先清再重算，
+    // 否则天光一换环境光就弹回 0.9，阴影又被冲淡（原先就是这里把画面拉平的）
+    if (scene) {
       scene.traverse(function (o) {
-        if (o.isMesh && o.material && !o.material.isShaderMaterial) {
-          const ms = Array.isArray(o.material) ? o.material : [o.material];
-          for (let k = 0; k < ms.length; k++) {
-            if (ms[k].isMeshStandardMaterial) ms[k].envMapIntensity = 0.9;
-          }
-        }
+        if (o.isHemisphereLight || o.isDirectionalLight) o.__base = undefined;
       });
     }
+    applyLightMix();
   }
 
   /* ---------------------------------------------------------- camera mood */
@@ -8495,7 +8507,7 @@ body.noui #stage::after{display:none}
     'uniform vec2 uRes;',
     'uniform float uExposure, uAO, uBloom, uTime, uFade, uGrain, uVignette, uCA, uFogDensity, uFogHeight, uSat, uDbg, uShadowOn;',
     'varying vec2 vUv;',
-    'float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }',
+    'float hash(vec2 p){ p = fract(p * vec2(0.1031, 0.1030)); p += dot(p, p.yx + 33.33); return fract((p.x + p.y) * p.x); }',
     'vec3 aces(vec3 x){',
     '  const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;',
     '  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);',
@@ -8570,13 +8582,13 @@ body.noui #stage::after{display:none}
     '  // --- 暗角',
     '  float v = length((uv - 0.5) * vec2(1.05, 1.0));',
     '  c *= mix(1.0, uVignette, smoothstep(0.34, 0.95, v));',
-    '  // --- 颗粒',
-    '  if (uGrain > 0.0) {',
-    '    float g = hash(uv * uRes + fract(uTime) * 91.7) - 0.5;',
-    '    c += g * uGrain * (1.0 - lum * 0.5);',
-    '  }',
     '  // --- 伽马 + 淡入',
     '  c = pow(max(c, 0.0), vec3(1.0 / 2.2));',
+    '  // --- 颗粒：必须在伽马之后加。放在线性空间时 pow() 会把暗部的微小扰动放大成一片麻点',
+    '  if (uGrain > 0.0) {',
+    '    float g = hash(uv * uRes + fract(uTime) * 91.7) - 0.5;',
+    '    c += g * uGrain;',
+    '  }',
     '  c *= uFade;',
     '  gl_FragColor = vec4(c, 1.0);',
     '}'
