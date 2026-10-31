@@ -312,7 +312,7 @@ body.noui #stage::after{display:none}
 
   const SURF = {
     plaster: { r: 0.97, m: 0.00, e: 0.30 },
-    tile:    { r: 0.55, m: 0.10, e: 0.85 },   // 黛瓦：有釉光
+    tile:    { r: 0.80, m: 0.06, e: 0.72 },   // 黛瓦：老瓦少釉光，太亮会点出一排白点
     wood:    { r: 0.66, m: 0.00, e: 0.36 },
     stone:   { r: 0.84, m: 0.00, e: 0.48 },
     leaf:    { r: 0.90, m: 0.00, e: 0.34 },
@@ -374,11 +374,13 @@ body.noui #stage::after{display:none}
         float damp = smoothstep(1.55, 0.05, p.y);
         float streak = dFBM(vec3(p.x*2.1, p.y*0.22, p.z*2.1));
         // 石灰墙是「干净里带一点脏」，不是霉菌斑：潮湿与陈旧都只能压到 ~0.9
-        t *= mix(1.0, 0.88, damp);
+        float up = smoothstep(0.35, 3.70, p.y);
+        t *= mix(0.88, 1.0, up);
+        t *= mix(1.0, 0.84, damp);
         t *= mix(1.0, 0.955, smoothstep(0.46, 0.84, streak));
         t.b *= 1.02;
         // 大块陈旧斑（复用已算好的高度场，不新增噪声调用，避免超出片元指令上限）
-        t *= mix(1.0, 0.945, smoothstep(0.46, 0.78, h));
+        t *= mix(1.0, 0.915, smoothstep(0.44, 0.76, h));
       } else if (uKind < 1.5) {                 // 黛瓦：垄间压深
         float s = dStripe(p.x, 15.0, 5.0)*w.y + dStripe(p.z, 15.0, 5.0)*w.y;
         t *= 1.0 - s*0.10;
@@ -2013,7 +2015,7 @@ body.noui #stage::after{display:none}
             var u0 = i / U, u1 = (i + 1) / U, v0 = j / V, v1 = (j + 1) / V;
             var p00 = pt(k, u0, v0), p01 = pt(k, u0, v1);
             var p11 = pt(k, u1, v1), p10 = pt(k, u1, v0);
-            grp.add(GEO.quad(p00, p01, p11, p10, (i % 2) ? C.tileLight : C.tile, { jitter: 0.055 }));
+            grp.add(GEO.quad(p00, p01, p11, p10, (i % 2) ? C.tile : C.tileDark, { jitter: 0.055 }));
           }
         }
         // 檐口立边（瓦当滴水）
@@ -2182,9 +2184,9 @@ body.noui #stage::after{display:none}
           var dw = sl * 0.42;
           var dh = bh * 0.72;
           var sw = (sl - dw) / 2;
-          B(fg, sw, bh, tw, C.wall, -(dw + sw) / 2, deckY + bh / 2, zW, 0.045);
-          B(fg, sw, bh, tw, C.wall, (dw + sw) / 2, deckY + bh / 2, zW, 0.045);
-          B(fg, dw, bh - dh, tw, C.wall, 0, deckY + dh + (bh - dh) / 2, zW, 0.045);
+          B(fg, sw, bh, tw, C.wallDirty, -(dw + sw) / 2, deckY + bh / 2, zW, 0.045);
+          B(fg, sw, bh, tw, C.wallDirty, (dw + sw) / 2, deckY + bh / 2, zW, 0.045);
+          B(fg, dw, bh - dh, tw, C.wallDirty, 0, deckY + dh + (bh - dh) / 2, zW, 0.045);
           // 门洞（深色内凹）
           B(fg, dw * 0.99, dh * 0.99, 0.05, C.ink, 0, deckY + dh / 2, zW - tw / 2 - 0.01, 0.01);
           if (dense) B(fg, dw * 0.84, dh * 0.86, 0.03, 0x1b1e20, 0, deckY + dh / 2, zW - tw / 2 + 0.04, 0.0);
@@ -2203,7 +2205,7 @@ body.noui #stage::after{display:none}
             (dw + sw) / 2, deckY + 0.09 * ks, zW, 0.03);
         } else {
           /* 斜向面：实墙 + 木格窗 */
-          B(fg, sl, bh, tw, C.wall, 0, deckY + bh / 2, zW, 0.045);
+          B(fg, sl, bh, tw, C.wallDirty, 0, deckY + bh / 2, zW, 0.045);
           var ww = sl * 0.34;
           var wh = Math.min(bh * 0.44, 0.80 * ks);
           var wy = deckY + bh * 0.32;
@@ -6512,9 +6514,10 @@ body.noui #stage::after{display:none}
       const edgeD = Math.min(x + N / 2, N / 2 - x, z + N / 2, N / 2 - z);
       if (dw > 2) y *= Math.min(1, Math.max(0, edgeD / 3));
       /* 岛缘浸入水面：外圈 4.5 格平滑降到水下，方形边界藏进水里，岸线变成自然的弧 */
+      let sinkV = 0;
       if (dw > 2) {
-        const sink = 1 - Math.min(1, Math.max(0, (edgeD - 1.2) / 4.5));
-        if (sink > 0) y = y * (1 - sink) + (-1.75) * sink;
+        sinkV = 1 - Math.min(1, Math.max(0, (edgeD - 1.2) / 4.5));
+        if (sinkV > 0) y = y * (1 - sinkV) + (-1.75) * sinkV;
       }
 
       if (dw > 2) {
@@ -6549,6 +6552,9 @@ body.noui #stage::after{display:none}
         if (nearRoad) c.lerp(cDirt, 0.58);
         if (nearHouse) c.lerp(cDirt, 0.44);
       }
+      /* 入水那一圈压深成湿岸，否则岛缘是一圈惨白的亮边 */
+      if (sinkV > 0) c.lerp(new THREE.Color(0x2b3629), sinkV * 0.80);
+      if (edgeD < 3.2) c.lerp(new THREE.Color(0x39432f), (1 - edgeD / 3.2) * 0.70);
       const n3 = Math.sin(x * 1.87 + z * 2.53) * Math.cos(x * 1.31 - z * 1.71);
       const n4 = Math.sin(x * 5.3 - z * 4.1) * Math.cos(x * 3.7 + z * 6.2);
       const j = (0.92 + ((Math.sin(x * 12.9 + z * 7.3) * 43758.5) % 1) * 0.14) * (1 + n3 * 0.07 + n4 * 0.035);
@@ -6675,11 +6681,11 @@ body.noui #stage::after{display:none}
           w += noise(pf * 0.9) * 0.50 - 0.25;
           w += noise(pf * 2.9 + vec2(t * 0.05, -t * 0.04)) * 0.28 - 0.14;
 
-          vec3 n = normalize(vec3(-w * 0.060, 1.0, -w * 0.052));
+          vec3 n = normalize(vec3(-w * 0.150, 1.0, -w * 0.130));
           vec3 V = normalize(cameraPosition - vW);
           float fres = pow(1.0 - max(dot(n, V), 0.0), 3.0);
 
-          vec3 col = mix(uDeep, uShallow, 0.34 + 0.28 * w);
+          vec3 col = mix(uDeep, uShallow, 0.20 + 0.22 * w);
           // 河心深、近岸浅
           col = mix(col * 0.64, col, clamp(edge * 1.15, 0.0, 1.0));
           // 岸边浑水与青苔（压深，不能提亮：否则贴岸会出现一条亮边）
@@ -6692,11 +6698,11 @@ body.noui #stage::after{display:none}
             vec3 R = reflect(-V, n);
             R.y = abs(R.y) * 0.85 + 0.02;
             vec3 refl = textureCube(uCube, R).rgb;
-            col = mix(col, refl * 0.92, clamp(fres * 0.95 + 0.12, 0.0, 0.62));
+            col = mix(col, refl * 0.94, clamp(fres * 1.15 + 0.20, 0.0, 0.80));
           }
 
           vec3 H = normalize(uSun + V);
-          float spec = pow(max(dot(n, H), 0.0), 320.0);
+          float spec = pow(max(dot(n, H), 0.0), 180.0);
           col += vec3(1.0, 0.95, 0.82) * spec * 0.75;
           float spec2 = pow(max(dot(n, H), 0.0), 46.0);
           col += vec3(1.0, 0.96, 0.86) * spec2 * 0.05;
@@ -7622,7 +7628,7 @@ body.noui #stage::after{display:none}
     grain: true,
     ca: true,
     fogBank: !isMobile && QS.get('fogbank') !== '0',
-    dust: !isMobile && QS.get('dust') !== '0'
+    dust: false
   };
   if (QS.get('q') === 'low') { Q.ss = 1.0; Q.bloom = false; Q.grain = false; Q.ca = false; Q.fogBank = false; Q.dust = false; }
   if (QS.get('q') === 'high') { Q.ss = 1.5; }
@@ -7634,7 +7640,7 @@ body.noui #stage::after{display:none}
     bloom: 0.32,
     ao: 0.64,
     sat: 1.15,
-    vig: 0.90,
+    vig: 0.44,
     grain: 0.024,
     cloud: 0.75,
     env: 0.56,
@@ -7666,6 +7672,7 @@ body.noui #stage::after{display:none}
   let SW = 1, SH = 1;                     // supersampled scene size
   let rtScene = null, rtAO = null, rtAO2 = null, rtBloomA = null, rtBloomB = null;
   let rtRefl = null, mirrorCam = null, waterMatRef = null, waterY = -0.30;
+  let seaMat = null;
   let quadScene = null, quadCam = null, quadMesh = null;
   let aoMat = null, brightMat = null, blurMat = null, compMat = null;
   let stage = null;
@@ -7755,6 +7762,15 @@ body.noui #stage::after{display:none}
     '  // 地平线处加一层雾',
     '  float haze = smoothstep(0.16, -0.06, d.y);',
     '  col = mix(col, uFog, haze * 0.52);',
+    '  if (uHasRefl > 0.5) {',
+    '    vec4 rp = uReflMatrix * vec4(vW, 1.0);',
+    '    vec2 ruv = rp.xy / max(rp.w, 1e-4);',
+    '    if (ruv.x > 0.0 && ruv.x < 1.0 && ruv.y > 0.0 && ruv.y < 1.0) {',
+    '      vec3 rc = texture2D(uRefl, ruv).rgb * vec3(0.70, 0.82, 0.78);',
+    '      float amt = 0.0;',
+    '      col = mix(col, rc, amt);',
+    '    }',
+    '  }',
     '  gl_FragColor = vec4(col, 1.0);',
     '}'
   ].join('\n');
@@ -7772,6 +7788,15 @@ body.noui #stage::after{display:none}
     '  float sd = max(dot(d, uSunDir), 0.0);',
     '  col += uSun * pow(sd, 8.0) * 0.42 + uSun * pow(sd, 220.0) * 2.0;',
     '  col = mix(col, uFog, smoothstep(0.16, -0.06, d.y) * 0.72);',
+    '  if (uHasRefl > 0.5) {',
+    '    vec4 rp = uReflMatrix * vec4(vW, 1.0);',
+    '    vec2 ruv = rp.xy / max(rp.w, 1e-4);',
+    '    if (ruv.x > 0.0 && ruv.x < 1.0 && ruv.y > 0.0 && ruv.y < 1.0) {',
+    '      vec3 rc = texture2D(uRefl, ruv).rgb * vec3(0.70, 0.82, 0.78);',
+    '      float amt = 0.0;',
+    '      col = mix(col, rc, amt);',
+    '    }',
+    '  }',
     '  gl_FragColor = vec4(col, 1.0);',
     '}'
   ].join('\n');
@@ -8345,6 +8370,9 @@ body.noui #stage::after{display:none}
     'uniform vec3 uHaze;',
     'uniform vec3 uSunDir;',
     'uniform float uTime;',
+    'uniform sampler2D uRefl;',
+    'uniform float uHasRefl;',
+    'uniform mat4 uReflMatrix;',
     'varying vec3 vW;',
     'void main() {',
     '  vec3 d = vW - cameraPosition;',
@@ -8359,13 +8387,34 @@ body.noui #stage::after{display:none}
     '  vec3 sd = normalize(uSunDir + vec3(1e-4, 1e-4, 1e-4));',
     '  float sunAmt = pow(max(dot(dir, sd), 0.0), 6.0);',
     '  col += uHaze * sunAmt * 0.22;',
-    '  float hzn = smoothstep(420.0, 1050.0, dist);',
-    '  col = mix(col, uHaze * 1.10, hzn * 0.80);',
+    '  vec3 sxz = normalize(vec3(sd.x, 0.0, sd.z) + vec3(1e-4, 0.0, 1e-4));',
+    '  vec3 dxz = normalize(vec3(dir.x, 0.0, dir.z) + vec3(1e-4, 0.0, 1e-4));',
+    '  float path = pow(max(dot(dxz, sxz), 0.0), 18.0);',
+    '  col += uHaze * path * 0.30 * (0.35 + 0.65 * (1.0 - t1));',
+    '  float bw = sin(vW.z * 0.42 + sin(vW.x * 0.055) * 2.6 + uTime * 0.28);',
+  '  bw = bw * 0.5 + 0.5;',
+  '  float bw2 = sin(vW.z * 1.05 - vW.x * 0.21 + uTime * 0.45);',
+  '  bw2 = bw2 * 0.5 + 0.5;',
+  '  float bmask = (1.0 - t2) * smoothstep(30.0, 150.0, dist);',
+  '  col *= 1.0 + ((bw - 0.5) * 0.075 + (bw2 - 0.5) * 0.030) * bmask;',
+  '  float hzn = smoothstep(420.0, 1050.0, dist);',
+    '  col = mix(col, uHaze * 1.02, hzn * 0.92);',
     '  float br = sin(vW.x * 0.012 + uTime * 0.18) * sin(vW.z * 0.011 - uTime * 0.13);',
     '  col *= 1.0 + br * 0.012 * t1;',
+    '  float rad = length(vW.xz);',
+    '  col = mix(col, uDeep * 0.62, smoothstep(78.0, 47.0, rad));',
     '  float rp = sin(vW.x * 0.085 + vW.z * 0.021 + uTime * 0.33) * sin(vW.z * 0.104 - uTime * 0.21 + 1.7);',
     '  rp = smoothstep(0.30, 0.98, rp * 0.5 + 0.5);',
     '  col *= 1.0 + rp * 0.17 * (1.0 - t1);',
+    '  if (uHasRefl > 0.5) {',
+    '    vec4 rp = uReflMatrix * vec4(vW, 1.0);',
+    '    vec2 ruv = rp.xy / max(rp.w, 1e-4);',
+    '    if (ruv.x > 0.0 && ruv.x < 1.0 && ruv.y > 0.0 && ruv.y < 1.0) {',
+    '      vec3 rc = texture2D(uRefl, ruv).rgb * vec3(0.70, 0.82, 0.78);',
+    '      float amt = 0.0;',
+    '      col = mix(col, rc, amt);',
+    '    }',
+    '  }',
     '  gl_FragColor = vec4(col, 1.0);',
     '}'
   ].join('\n');
@@ -8374,7 +8423,7 @@ body.noui #stage::after{display:none}
     if (!scene) return;
     const fc = (scene.fog && scene.fog.color) ? scene.fog.color : new THREE.Color(0xcfd8ce);
     const deep = new THREE.Color(0x203c43).convertSRGBToLinear();
-    const haze = new THREE.Color().copy(fc).lerp(new THREE.Color(0xfdfaf1), 0.12).convertSRGBToLinear();
+    const haze = new THREE.Color().copy(fc).lerp(new THREE.Color(0xfdfaf1), 0.34).convertSRGBToLinear();
     let gp = scene.getObjectByName('cine-ground');
     if (!gp) {
       const mat = new THREE.ShaderMaterial({
@@ -8382,7 +8431,10 @@ body.noui #stage::after{display:none}
           uDeep: { value: deep },
           uHaze: { value: haze },
           uSunDir: { value: new THREE.Vector3(0, 1, 0) },
-          uTime: { value: 0 }
+          uTime: { value: 0 },
+          uRefl: { value: null },
+          uHasRefl: { value: 0 },
+          uReflMatrix: { value: new THREE.Matrix4() }
         },
         vertexShader: SEA_VERT,
         fragmentShader: SEA_FRAG,
@@ -8400,6 +8452,7 @@ body.noui #stage::after{display:none}
       if (u && u.uDeep) u.uDeep.value.copy(deep);
       if (u && u.uHaze) u.uHaze.value.copy(haze);
     }
+    seaMat = gp.material;
     if (deco) deco.ground = gp;
   }
   function decorate() {    if (decorated || !scene) return;
@@ -8417,24 +8470,24 @@ body.noui #stage::after{display:none}
     try {
       const fc = (scene.fog && scene.fog.color) ? scene.fog.color : new THREE.Color(0xcfd8ce);
       void grp;
-      for (let b = 0; b < 3; b++) {
-        const rad = 380 + b * 110;
-        const cnt = 9 + b * 3;
+      for (let b = 0; b < 0; b++) {
+        const rad = 214 + b * 42;
+        const cnt = 11 + b * 3;
         // 这三圈必须极淡。原来 0x2c4342 只掺 0.40 雾色，36 个锥首尾相接，
         // 在地平线上连成一堵深色墙，把后面那片亮海整片挡掉 —— wide 画面上半幅
         // 一直发青的真正原因就是它，不是海面贴图。
         const hillMat = new THREE.MeshBasicMaterial({
-          color: new THREE.Color(0x35514e).lerp(fc, 0.62 + b * 0.13),
+          color: new THREE.Color(0x35514e).lerp(fc, 0.52 + b * 0.14),
           fog: false,
           depthWrite: true
         });
         for (let i = 0; i < cnt; i++) {
           const a = (i / cnt) * 6.283 + (b * 0.7) + Math.random() * 0.5;
           const rr = rad * (0.88 + Math.random() * 0.24);
-          const hh = 12 + Math.random() * 16 + b * 9;
-          const ww = 70 + Math.random() * 110;
+          const hh = 4.5 + Math.random() * 5 + b * 3.2;
+          const ww = 95 + Math.random() * 120;
           const cm = new THREE.Mesh(new THREE.ConeGeometry(ww, hh, 5, 1), hillMat);
-          cm.position.set(Math.cos(a) * rr, hh * 0.34 - 1.2, Math.sin(a) * rr);
+          cm.position.set(Math.cos(a) * rr, hh * 0.30 - 1.4, Math.sin(a) * rr);
           cm.scale.z = 0.5 + Math.random() * 0.4;
           cm.rotation.y = Math.random() * 3.14;
           cm.renderOrder = -1;
@@ -8484,17 +8537,17 @@ body.noui #stage::after{display:none}
         deco.mist.push(pl);
       }
       // 岸线低雾环：把岛与水的硬边化开（江南晨雾）
-      for (let i = 0; i < 20; i++) {
-        const a = (i / 20) * 6.283 + 0.17;
-        const rr2 = 63 + Math.random() * 14;
-        const s2 = 58 + Math.random() * 46;
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * 6.283 + 0.17;
+        const rr2 = 74 + Math.random() * 26;
+        const s2 = 74 + Math.random() * 54;
         const mat2 = new THREE.MeshBasicMaterial({
-          map: tex, transparent: true, opacity: 0.022 + Math.random() * 0.026,
+          map: tex, transparent: true, opacity: 0.010 + Math.random() * 0.014,
           depthWrite: false, side: THREE.DoubleSide, color: 0xe6eeea
         });
         const pl2 = new THREE.Mesh(new THREE.PlaneGeometry(s2, s2), mat2);
         pl2.rotation.x = -Math.PI / 2;
-        pl2.position.set(Math.cos(a) * rr2, 0.55 + Math.random() * 0.9, Math.sin(a) * rr2);
+        pl2.position.set(Math.cos(a) * rr2, 0.22 + Math.random() * 0.42, Math.sin(a) * rr2);
         pl2.renderOrder = 2;
         pl2.userData.spin = (Math.random() - 0.5) * 0.006;
         pl2.userData.drift = Math.random() * 6.28;
@@ -8754,6 +8807,11 @@ body.noui #stage::after{display:none}
       wm.uniforms.uRefl.value = rtRefl.texture;
       wm.uniforms.uHasRefl.value = 1;
       if (wm.uniforms.uRes) wm.uniforms.uRes.value.set(BW, BH);
+    }
+    if (seaMat && seaMat.uniforms) {
+      if (seaMat.uniforms.uRefl) { seaMat.uniforms.uRefl.value = rtRefl.texture; seaMat.uniforms.uHasRefl.value = 1; }
+      if (seaMat.uniforms.uReflMatrix) seaMat.uniforms.uReflMatrix.value
+        .copy(_biasM).multiply(mirrorCam.projectionMatrix).multiply(mirrorCam.matrixWorldInverse);
     }
 
     // 水面本身不参与倒影渲染
