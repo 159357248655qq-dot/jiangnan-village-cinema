@@ -576,7 +576,7 @@ body.noui #stage::after{display:none}
       MAT_LEAF.onBeforeCompile = (sh) => {
         sh.fragmentShader = sh.fragmentShader.replace(
           '#include <lights_fragment_end>',
-          '#include <lights_fragment_end>\n  reflectedLight.indirectDiffuse += diffuseColor.rgb * 0.46;\n  // fake 透光：叶背也要亮，否则逆光树冠全是黑块\n  reflectedLight.directDiffuse += diffuseColor.rgb * 0.26;'
+          '#include <lights_fragment_end>\n  reflectedLight.indirectDiffuse += diffuseColor.rgb * 0.30;\n  // fake 透光：叶背也要亮，否则逆光树冠全是黑块\n  reflectedLight.directDiffuse += diffuseColor.rgb * 0.12;'
         );
       };
       MAT_LEAF.customProgramCacheKey = () => 'leaf';
@@ -6500,11 +6500,11 @@ body.noui #stage::after{display:none}
     const pos = geo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
     const c = new THREE.Color();
-    const cGrass = new THREE.Color(0x59603f);
-    const cGrass2 = new THREE.Color(0x68714a);
+    const cGrass = new THREE.Color(0x4c5238);
+    const cGrass2 = new THREE.Color(0x5b6442);
     const cMud = new THREE.Color(0x6b6350);
     const cRock = new THREE.Color(0x8e8c80);
-    const cHill = new THREE.Color(0x4f6140);
+    const cHill = new THREE.Color(0x46543a);
     const cDry = new THREE.Color(0x847f55);
     const cDirt = new THREE.Color(0x8b7f66);
     const cSand = new THREE.Color(0x8b8570);
@@ -7664,7 +7664,7 @@ body.noui #stage::after{display:none}
     fog: 0.00040,
     bloom: 0.32,
     ao: 0.64,
-    sat: 1.15,
+    sat: 1.10,
     vig: 0.44,
     grain: 0.024,
     cloud: 0.75,
@@ -8013,7 +8013,7 @@ body.noui #stage::after{display:none}
         o.intensity = o.__base * (TUNE.sunonly ? 0.10 : 0.58);
       } else if (o.isDirectionalLight) {
         if (o.__base === undefined) o.__base = o.intensity;
-        o.intensity = o.__base * (o === sun ? 1.30 : 0.50);
+        o.intensity = o.__base * (o === sun ? 1.26 : 0.60);
       }
     });
     scene.traverse(function (o) {
@@ -9218,9 +9218,9 @@ body.noui #stage::after{display:none}
     '  c = aces(c);',
     '  // lift / gamma / gain 三段调色',
     '  c = pow(max(c, 0.0), vec3(0.96, 1.0, 1.04));',
-    '  c = c * 0.97 + 0.008;',
+    '  c = c * 0.955 + 0.018;',
     '  // S 形对比：把中灰推开，暗部沉下去，白墙才立得起来',
-    '  c = mix(c, c * c * (3.0 - 2.0 * c), 0.22);',
+    '  c = mix(c, c * c * (3.0 - 2.0 * c), 0.13);',
     '  // 分色：暗部偏青，亮部偏暖',
     '  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));',
     '  vec3 shadowTint = vec3(0.86, 0.99, 1.15);',
