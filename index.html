@@ -371,13 +371,14 @@ body.noui #stage::after{display:none}
       float g = h - 0.5;
       vec3 t = vec3(1.0) + g * uGrain * 0.45;
       if (uKind < 0.5) {                        // 白墙：墙脚返潮、上部雨痕
-        float damp = smoothstep(2.10, 0.04, p.y);
-        float streak = dFBM(vec3(p.x*3.2, p.y*0.30, p.z*3.2));
-        t *= mix(1.0, 0.72, damp);
-        t *= mix(1.0, 0.92, smoothstep(0.46, 0.84, streak));
+        float damp = smoothstep(1.55, 0.05, p.y);
+        float streak = dFBM(vec3(p.x*2.1, p.y*0.22, p.z*2.1));
+        // 石灰墙是「干净里带一点脏」，不是霉菌斑：潮湿与陈旧都只能压到 ~0.9
+        t *= mix(1.0, 0.88, damp);
+        t *= mix(1.0, 0.955, smoothstep(0.46, 0.84, streak));
         t.b *= 1.02;
         // 大块陈旧斑（复用已算好的高度场，不新增噪声调用，避免超出片元指令上限）
-        t *= mix(1.0, 0.86, smoothstep(0.46, 0.78, h));
+        t *= mix(1.0, 0.945, smoothstep(0.46, 0.78, h));
       } else if (uKind < 1.5) {                 // 黛瓦：垄间压深
         float s = dStripe(p.x, 15.0, 5.0)*w.y + dStripe(p.z, 15.0, 5.0)*w.y;
         t *= 1.0 - s*0.10;
@@ -1588,6 +1589,19 @@ body.noui #stage::after{display:none}
       ventWin(bw * 0.26, 3.02, -bd / 2 - 0.005, Math.min(0.46, bw * 0.10), 0.44, 'back');
       ventWin(bw / 2 + 0.185, 2.42, -bd * 0.16, Math.min(0.52, bd * 0.11), 0.48, 'right');
       ventWin(-bw / 2 - 0.185, 2.60, bd * 0.14, Math.min(0.48, bd * 0.10), 0.44, 'left');
+      /* 墙够高时再补一排高窗：山墙只有一扇窗时，整面白墙读起来是平板 */
+      if (eaveY > 3.55) {
+        ventWin(bw / 2 + 0.185, 3.36, -bd * 0.30, Math.min(0.46, bd * 0.10), 0.42, 'right');
+        ventWin(-bw / 2 - 0.185, 3.20, bd * 0.30, Math.min(0.42, bd * 0.09), 0.40, 'left');
+        ventWin(-bw * 0.30, 1.62, -bd / 2 - 0.005, Math.min(0.40, bw * 0.09), 0.36, 'back');
+      }
+    }
+
+    /* 石墙脚：0.52 高的基石 + 一道压顶滴水线。
+       白墙从地里直接长出来是最露怯的一处，有了墙脚才有"房子坐在地上"的重力。 */
+    function stoneBase(bw, bd) {
+      bx(g, bw + 0.07, 0.52, bd + 0.07, C.stoneLight, 0, podH + 0.26, 0, 0.06);
+      bx(g, bw + 0.13, 0.085, bd + 0.13, C.stone, 0, podH + 0.565, 0, 0.04);
     }
 
     function makeRh(bd) {
@@ -1692,6 +1706,7 @@ body.noui #stage::after{display:none}
       bx(g, 0.10, uWinH + 0.14, 0.11, C.woodDark, 0, uWinY + uWinH / 2, uD / 2 + 0.035, 0.03);
 
       doorSet(0, podH, doorW, doorH, hd);
+      stoneBase(bodyW, bodyD);
       agePatches(bodyW, bodyD);
       sideBackWindows(bodyW, bodyD);
 
@@ -1787,6 +1802,7 @@ body.noui #stage::after{display:none}
       gable(bodyW, bodyD, eaveY, rsS, podH);
       roofSet(bodyW, bodyD, eaveY, rsS, scS);
       eaveDetail(bodyW, bodyD, eaveY, true);
+      stoneBase(bodyW, bodyD);
       agePatches(bodyW, bodyD);
       sideBackWindows(bodyW, bodyD);
 
@@ -1819,6 +1835,7 @@ body.noui #stage::after{display:none}
       windowHood(wx, winY, hd, winW, winH);
 
       doorSet(0, podH, doorW, doorH, hd);
+      stoneBase(bodyW, bodyD);
       agePatches(bodyW, bodyD);
       sideBackWindows(bodyW, bodyD);
     }
@@ -6773,7 +6790,16 @@ body.noui #stage::after{display:none}
     const H = meta.N / 2;
     const POS = [], COL = [];
     const _c = new THREE.Color();
-    const bands = [[0, -0.55, 0x6f7448], [-0.55, -2.6, 0x6d5c46], [-2.6, -5.6, 0x554a3d], [-5.6, -6.2, 0x40382f]];
+    const bands = [
+      [0, -0.34, 0x7f7d54],     // 草根土
+      [-0.34, -0.72, 0x94896e], // 干沙
+      [-0.72, -1.30, 0x6d6455], // 湿沙
+      [-1.30, -6.20, 0x453d34]  // 水下暗影
+    ];
+    // 外挑系数：原来裙边是「向内收」的台面侧壁（一个 6 单位高的直切面），
+    // 低机位一看就是一块被切下来的方蛋糕。改成向外铺开的浅滩，
+    // 才让岛有水陆过渡而不是一块漂浮的板。
+    const SPREAD = 2.6;
     function pushQ(p0, p1, p2, p3, hex) {
       _c.setHex(hex).convertSRGBToLinear();
       const v = [p0, p1, p2, p0, p2, p3];
@@ -6787,16 +6813,16 @@ body.noui #stage::after{display:none}
     ];
     for (const e of edges) {
       for (const [y0, y1, col] of bands) {
-        const i0 = (-y0) * 0.085, i1 = (-y1) * 0.085;
+        const i0 = (-y0) * SPREAD, i1 = (-y1) * SPREAD;
         pushQ(
-          [e.a[0] + e.in[0] * i0, y0, e.a[1] + e.in[1] * i0],
-          [e.a[0] + e.in[0] * i1, y1, e.a[1] + e.in[1] * i1],
-          [e.b[0] + e.in[0] * i1, y1, e.b[1] + e.in[1] * i1],
-          [e.b[0] + e.in[0] * i0, y0, e.b[1] + e.in[1] * i0],
+          [e.a[0] - e.in[0] * i0, y0, e.a[1] - e.in[1] * i0],
+          [e.a[0] - e.in[0] * i1, y1, e.a[1] - e.in[1] * i1],
+          [e.b[0] - e.in[0] * i1, y1, e.b[1] - e.in[1] * i1],
+          [e.b[0] - e.in[0] * i0, y0, e.b[1] - e.in[1] * i0],
           col);
       }
     }
-    const b0 = -6.2, ins = 0.085 * 6.2;
+    const b0 = -6.2, ins = 6.2 * SPREAD;
     pushQ([-H + ins, b0, H - ins], [H - ins, b0, H - ins], [H - ins, b0, -H + ins], [-H + ins, b0, -H + ins], 0x3a332b);
 
     const g = new THREE.BufferGeometry();
@@ -7787,6 +7813,7 @@ body.noui #stage::after{display:none}
       try {
         scene.traverse(function (o) { if (o.isLight) o.__base = undefined; });
         applyLightMix();
+        refreshSea();
       } catch (e) { }
       return r;
     };
@@ -8125,6 +8152,76 @@ body.noui #stage::after{display:none}
     });
   }
 
+  // 远海：直接按"到相机的距离"算颜色的平面（半径 1600）。
+  // 之前用 CanvasTexture 铺径向渐变，对不上三轮 —— 画面上半幅几乎不起变化，
+  // 说明可见的那一段 UV 落在渐变最内圈的极窄区间里，靠猜 stop 猜不出来。
+  // 改成 shader 里用 distance(vW, cameraPosition) 插值：透视距离本身就是想要的量，
+  // 不再依赖贴图分辨率、UV 映射或相机参数。
+  const SEA_VERT = [
+    'varying vec3 vW;',
+    'void main() {',
+    '  vec4 w = modelMatrix * vec4(position, 1.0);',
+    '  vW = w.xyz;',
+    '  gl_Position = projectionMatrix * viewMatrix * w;',
+    '}'
+  ].join('\n');
+  const SEA_FRAG = [
+    'uniform vec3 uDeep;',
+    'uniform vec3 uHaze;',
+    'uniform vec3 uSunDir;',
+    'uniform float uTime;',
+    'varying vec3 vW;',
+    'void main() {',
+    '  vec3 d = vW - cameraPosition;',
+    '  float dist = length(d);',
+    '  vec3 dir = d / max(dist, 1e-4);',
+    '  float t1 = smoothstep(115.0, 520.0, dist);',
+    '  float t2 = smoothstep(300.0, 700.0, dist);',
+    '  vec3 col = mix(uDeep, uHaze * 0.72, t1);',
+    '  col = mix(col, uHaze * 0.88, t2);',
+    '  float graze = clamp(1.0 - abs(dir.y) * 2.6, 0.0, 1.0);',
+    '  col = mix(col, uHaze * 1.04, graze * 0.34 * t1);',
+    '  vec3 sd = normalize(uSunDir + vec3(1e-4, 1e-4, 1e-4));',
+    '  float sunAmt = pow(max(dot(dir, sd), 0.0), 6.0);',
+    '  col += uHaze * sunAmt * 0.22;',
+    '  float br = sin(vW.x * 0.012 + uTime * 0.18) * sin(vW.z * 0.011 - uTime * 0.13);',
+    '  col *= 1.0 + br * 0.012 * t1;',
+    '  gl_FragColor = vec4(col, 1.0);',
+    '}'
+  ].join('\n');
+
+  function refreshSea() {
+    if (!scene) return;
+    const fc = (scene.fog && scene.fog.color) ? scene.fog.color : new THREE.Color(0xcfd8ce);
+    const deep = new THREE.Color(0x1b2f32).convertSRGBToLinear();
+    const haze = new THREE.Color().copy(fc).lerp(new THREE.Color(0xfdfaf1), 0.12).convertSRGBToLinear();
+    let gp = scene.getObjectByName('cine-ground');
+    if (!gp) {
+      const mat = new THREE.ShaderMaterial({
+        uniforms: {
+          uDeep: { value: deep },
+          uHaze: { value: haze },
+          uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+          uTime: { value: 0 }
+        },
+        vertexShader: SEA_VERT,
+        fragmentShader: SEA_FRAG,
+        depthWrite: true
+      });
+      gp = new THREE.Mesh(new THREE.CircleGeometry(1600, 72), mat);
+      gp.rotation.x = -Math.PI / 2;
+      gp.position.y = -0.62;
+      gp.renderOrder = -1;
+      gp.name = 'cine-ground';
+      gp.frustumCulled = false;
+      scene.add(gp);
+    } else {
+      const u = gp.material.uniforms;
+      if (u && u.uDeep) u.uDeep.value.copy(deep);
+      if (u && u.uHaze) u.uHaze.value.copy(haze);
+    }
+    if (deco) deco.ground = gp;
+  }
   function decorate() {    if (decorated || !scene) return;
     decorated = true;
     const grp = new THREE.Group();
@@ -8135,74 +8232,26 @@ body.noui #stage::after{display:none}
     try { hudEl = hudEl || makeHud(); } catch (e) { }
     if (TUNE.letterbox) { try { deco.lb = makeLetterbox(); } catch (e) { } }
 
-    // 远景：把村庄坐进一片开阔水面，一路化进雾里（不再是黑虚空）
+    // 远景：把村庄坐进一片开阔水面，一路亮到天光（不再是黑虚空）
+    try { refreshSea(); } catch (e) { }
     try {
       const fc = (scene.fog && scene.fog.color) ? scene.fog.color : new THREE.Color(0xcfd8ce);
-      const gs = 512, gc = document.createElement('canvas');
-      gc.width = gc.height = gs;
-      const gg = gc.getContext('2d');
-      const deep = new THREE.Color(0x24393c);
-      const rg = gg.createRadialGradient(gs / 2, gs / 2, gs * 0.02, gs / 2, gs / 2, gs * 0.5);
-      const near = new THREE.Color().copy(deep).lerp(fc, 0.06);
-      const mid = new THREE.Color().copy(deep).lerp(fc, 0.22);
-      // 注意：这张贴图铺在半径 1600 的盘上，stop 是按半径百分比走的。
-      // 之前把「纯雾色」放在 stop 0.30（=世界半径 480）就得出一圈假地平线，
-      // 整幅背景变成一片牛奶白；现在把颜色变化推到 0.5 之外。
-      rg.addColorStop(0.0, '#' + near.getHexString());
-      rg.addColorStop(0.09, '#' + mid.getHexString());
-      rg.addColorStop(0.22, '#' + new THREE.Color().copy(deep).lerp(fc, 0.46).getHexString());
-      rg.addColorStop(0.50, '#' + new THREE.Color().copy(deep).lerp(fc, 0.72).getHexString());
-      rg.addColorStop(1.0, '#' + fc.getHexString());
-      gg.fillStyle = rg; gg.fillRect(0, 0, gs, gs);
-      // 水面细纹：横向短笔触，远看是起伏而不是噪点
-      for (let i = 0; i < 1100; i++) {
-        const a = Math.random() * 6.283, r = Math.pow(Math.random(), 0.62) * gs * 0.15;
-        const x = gs / 2 + Math.cos(a) * r, y = gs / 2 + Math.sin(a) * r;
-        const t2 = 1 - r / (gs * 0.16);
-        const len = 3 + Math.random() * 20 * t2;
-        gg.strokeStyle = 'rgba(' + (150 + Math.random() * 60 | 0) + ',' + (176 + Math.random() * 50 | 0) + ',' + (176 + Math.random() * 46 | 0) + ',' + (0.055 + 0.20 * t2).toFixed(3) + ')';
-        gg.lineWidth = 0.8 + Math.random() * 1.6;
-        gg.beginPath(); gg.moveTo(x - len, y); gg.lineTo(x + len, y + (Math.random() - 0.5) * 1.4); gg.stroke();
-      }
-      // 大尺度风纹：几十块柔和明暗斑，远看成片的水色起伏
-      for (let i = 0; i < 70; i++) {
-        const a = Math.random() * 6.283, r = Math.pow(Math.random(), 0.6) * gs * 0.20;
-        const x = gs / 2 + Math.cos(a) * r, y = gs / 2 + Math.sin(a) * r;
-        const rad = 26 + Math.random() * 96;
-        const g2 = gg.createRadialGradient(x, y, 0, x, y, rad);
-        const up = Math.random() > 0.42;
-        const al = (0.018 + Math.random() * 0.055).toFixed(3);
-        const col = up ? '214,228,224' : '28,48,50';
-        g2.addColorStop(0, 'rgba(' + col + ',' + al + ')');
-        g2.addColorStop(1, 'rgba(' + col + ',0)');
-        gg.fillStyle = g2;
-        gg.beginPath(); gg.arc(x, y, rad, 0, 6.283); gg.fill();
-      }
-      const gtex = new THREE.CanvasTexture(gc);
-      gtex.encoding = THREE.sRGBEncoding;
-      const gmat = new THREE.MeshBasicMaterial({ map: gtex, fog: true });
-      const gp = new THREE.Mesh(new THREE.CircleGeometry(1600, 72), gmat);
-      gp.rotation.x = -Math.PI / 2;
-      gp.position.y = -0.62;
-      gp.renderOrder = -1;
-      gp.name = 'cine-ground';
-      grp.add(gp);
-      deco.ground = gp;
-
-      // 远山：三圈低丘压在地平线上。关掉 fog 并预先按距离掺雾色，
-      // 否则在 fog far(≈330) 之外会被雾吃掉，等于没画（远处一片牛奶白）。
+      void grp;
       for (let b = 0; b < 3; b++) {
-        const rad = 330 + b * 100;
+        const rad = 380 + b * 110;
         const cnt = 9 + b * 3;
+        // 这三圈必须极淡。原来 0x2c4342 只掺 0.40 雾色，36 个锥首尾相接，
+        // 在地平线上连成一堵深色墙，把后面那片亮海整片挡掉 —— wide 画面上半幅
+        // 一直发青的真正原因就是它，不是海面贴图。
         const hillMat = new THREE.MeshBasicMaterial({
-          color: new THREE.Color(0x2c4342).lerp(fc, 0.40 + b * 0.16),
+          color: new THREE.Color(0x35514e).lerp(fc, 0.62 + b * 0.13),
           fog: false,
           depthWrite: true
         });
         for (let i = 0; i < cnt; i++) {
           const a = (i / cnt) * 6.283 + (b * 0.7) + Math.random() * 0.5;
           const rr = rad * (0.88 + Math.random() * 0.24);
-          const hh = 20 + Math.random() * 30 + b * 12;
+          const hh = 12 + Math.random() * 16 + b * 9;
           const ww = 70 + Math.random() * 110;
           const cm = new THREE.Mesh(new THREE.ConeGeometry(ww, hh, 5, 1), hillMat);
           cm.position.set(Math.cos(a) * rr, hh * 0.34 - 1.2, Math.sin(a) * rr);
@@ -8284,8 +8333,8 @@ body.noui #stage::after{display:none}
       });
       const b = new THREE.Mesh(new THREE.PlaneGeometry(w, w * 0.5), mat);
       b.userData = {
-        r: 46 + Math.random() * 70, a: Math.random() * 6.28,
-        y: 46 + Math.random() * 26, sp: 0.055 + Math.random() * 0.05,
+        r: 52 + Math.random() * 62, a: Math.random() * 6.28,
+        y: 50 + Math.random() * 24, sp: 0.055 + Math.random() * 0.05,
         ph: Math.random() * 6.28
       };
       grp.add(b);
@@ -8315,6 +8364,12 @@ body.noui #stage::after{display:none}
       b.position.set(Math.cos(d.a) * d.r, d.y + Math.sin(t * 0.5 + d.ph) * 1.6, Math.sin(d.a) * d.r);
       b.rotation.y = -d.a + Math.PI / 2;
       b.rotation.z = Math.sin(t * 1.7 + d.ph) * 0.30;
+      // 鸟飞到镜头附近会被放大成一道黑笔触（曾在水天交界留一条怪线）：
+      // 离相机太近就按距离缩下去，飞远了恢复原尺寸。
+      if (camera) {
+        const dc = b.position.distanceTo(camera.position);
+        b.scale.setScalar(dc < 70 ? Math.max(0.10, (dc - 30) / 40) : 1);
+      }
     }
   }
 
@@ -8328,10 +8383,12 @@ body.noui #stage::after{display:none}
     const c = R.cam;
     // cinema 自己当摄影指导：不管 ?view 给的是哪一档，都按电影构图重新取景
     const FR = {
-      wide:  [0.64, 146],
+      // phi 是从 +Y 量的极角：0.64 只有约 53° 仰角，看着像棋盘；
+      // 0.93 大约 37° 仰角，才有"站在对岸看村子"的透视
+      wide:  [1.02, 122],
       over:  [0.17, 300],
       water: [1.02, 104],
-      close: [1.02, 24]
+      close: [1.02, 34]
     };
     const v = QS.get('view') || 'wide';
     const f = FR[v] || FR.wide;
