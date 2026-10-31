@@ -248,10 +248,10 @@ body.noui #stage::after{display:none}
   /* ---------- 调色板：江南 · 雨后黛瓦白墙 ---------- */
   const C = {
     // 墙体（徽派白墙是冷白，带石灰的灰，不是米黄）
-    wall:        0xe7e7e2,
-    wallDirty:   0xd0d3ce,
-    wallShadow:  0xb8bbb6,
-    wallWarm:    0xeeeee6,
+    wall:        0xdcdcd6,
+    wallDirty:   0xc4c7c2,
+    wallShadow:  0xa9aca7,
+    wallWarm:    0xe2e2d9,
     // 瓦
     tile:        0x4c545e,
     tileDark:    0x30363d,
@@ -284,7 +284,7 @@ body.noui #stage::after{display:none}
     // 水与天
     water:       0x436762,
     gold:        0xc9a24b,
-    white:       0xf2efe6,
+    white:       0xe8e5db,
     ink:         0x2a2a28,
     paper:       0xf3ece0,
   };
@@ -2998,7 +2998,7 @@ body.noui #stage::after{display:none}
   const _sd = new THREE.Vector3(), _su = new THREE.Vector3(), _sv = new THREE.Vector3();
   const _sc = new THREE.Vector3(), _sq = new THREE.Vector3(), _sp = new THREE.Vector3();
 
-  function shellCard(g, cx, cy, cz, r, dir, w, h, col, spin) {
+  function shellCard(g, cx, cy, cz, r, dir, w, h, col, spin, shade) {
     _sd.copy(dir).normalize();
     if (Math.abs(_sd.y) > 0.94) _su.set(1, 0, 0); else _su.set(0, 1, 0);
     _su.crossVectors(_su, _sd).normalize();
@@ -3014,6 +3014,11 @@ body.noui #stage::after{display:none}
     const q = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, -hh], [hw, hh], [-hw, hh]];
     const tq = [[0, 0], [1, 0], [1, 1], [0, 0], [1, 1], [0, 1]];
     _c2.setHex(col).convertSRGBToLinear();
+    if (shade !== undefined && shade !== 1) {
+      _c2.r = Math.min(1, _c2.r * shade + 0.004);
+      _c2.g = Math.min(1, _c2.g * shade + 0.005);
+      _c2.b = Math.min(1, _c2.b * shade + 0.004);
+    }
     for (let i = 0; i < 6; i++) {
       const a = q[i][0], b = q[i][1];
       pos[i * 3] = _sc.x + ux * a + vx * b;
@@ -3035,6 +3040,7 @@ body.noui #stage::after{display:none}
     return mesh;
   }
   const _c2 = new THREE.Color();
+  const _sunCard = new THREE.Vector3(-0.42, 0.78, 0.46).normalize();
 
   /* 一整团树冠：球壳撒叶 + 少量内层暗叶兜底 */
   function canopy(g, cx, cy, cz, r, rnd, warm, dens, flat) {
@@ -3055,7 +3061,8 @@ body.noui #stage::after{display:none}
       const t = Math.min(1, Math.max(0, (u + 1) * 0.5));
       const col = canopyCol(t * 0.92 + 0.04, rnd, warm);
       const w = r * (0.21 + rnd() * 0.20);
-      shellCard(g, cx, cy, cz, rr, _sd, w, w * (0.66 + rnd() * 0.26), col, rnd() * 6.28318);
+      const shade = 0.74 + rnd() * 0.34 + 0.20 * Math.max(0, _sd.dot(_sunCard));
+      shellCard(g, cx, cy, cz, rr, _sd, w, w * (0.66 + rnd() * 0.26), col, rnd() * 6.28318, shade);
     }
     // 外飘小叶：把壳的边缘打碎，近景才不会看出一个规整的球
     const ns = Math.max(4, Math.round(n * 0.24));
@@ -6847,7 +6854,7 @@ body.noui #stage::after{display:none}
     const POS = [], COL = [];
     const curb = new THREE.Group();
     const slabs = [0x9d9a8f, 0xa9a598, 0x918e83, 0xa29c8c, 0x969287];
-    const joint = 0x86837a;
+    const joint = 0x6f6c64;
     const _c = new THREE.Color();
 
     function qrect(x, z, w, d, y, hex) {
@@ -6867,8 +6874,8 @@ body.noui #stage::after{display:none}
        按格号决定切成一块 / 两块 / 四块，每块给一点高差和冷暖差，
        缝里再长几簇苔草——尺度一细，"Minecraft 地板"的感觉就散了。 */
     const mossC = [0x4a5733, 0x556236, 0x3f4d2c, 0x5d6a3d];
-    const slabsWarm = [0xa8a294, 0xb0a898, 0x9c9686];
-    const slabsCool = [0x8f948c, 0x9a9d94, 0x878b84];
+    const slabsWarm = [0x968f80, 0x9e9583, 0x8b8474];
+    const slabsCool = [0x7f857e, 0x888d85, 0x787d77];
 
     function paveCell(wx0, wz0, x, z) {
       const mode = (x * 5 + z * 11 + ((x * z) % 7)) % 4;
