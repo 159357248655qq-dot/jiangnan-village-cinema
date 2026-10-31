@@ -8419,7 +8419,7 @@ body.noui #stage::after{display:none}
     '  float br = sin(vW.x * 0.012 + uTime * 0.18) * sin(vW.z * 0.011 - uTime * 0.13);',
     '  col *= 1.0 + br * 0.012 * t1;',
     '  float rad = length(vW.xz);',
-    '  col = mix(col, uDeep * 0.62, smoothstep(78.0, 47.0, rad));',
+    '  col = mix(col, uDeep * 0.80, smoothstep(96.0, 46.0, rad) * 0.35);',
     '  float rp = sin(vW.x * 0.085 + vW.z * 0.021 + uTime * 0.33) * sin(vW.z * 0.104 - uTime * 0.21 + 1.7);',
     '  rp = smoothstep(0.30, 0.98, rp * 0.5 + 0.5);',
     '  col *= 1.0 + rp * 0.17 * (1.0 - t1);',
