@@ -5898,7 +5898,7 @@ body.noui #stage::after{display:none}
     return h >>> 0;
   }
 
-  const TREE_REF = { camphor: 8, willow: 5.5, pine: 6.5, shrub: 1.2, bamboo: 6, reed: 1.2 };
+  const TREE_REF = { camphor: 6.4, willow: 4.7, pine: 5.4, shrub: 1.15, bamboo: 5.0, reed: 1.2 };
 
   function build(meta, scene, onStage) {
     return new Promise((resolve, reject) => {
@@ -6507,7 +6507,7 @@ body.noui #stage::after{display:none}
     const cHill = new THREE.Color(0x4f6140);
     const cDry = new THREE.Color(0x847f55);
     const cDirt = new THREE.Color(0x8b7f66);
-    const cSand = new THREE.Color(0xa39c86);
+    const cSand = new THREE.Color(0x8b8570);
 
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i);
@@ -6563,8 +6563,8 @@ body.noui #stage::after{display:none}
       }
 
       if (dw === 0) c.copy(cMud).multiplyScalar(0.62);
-      else if (dw === 1) c.copy(cMud).lerp(cSand, 0.30).multiplyScalar(0.86);
-      else if (dw === 2) c.copy(cSand).lerp(cGrass, 0.34);
+      else if (dw === 1) c.copy(cMud).lerp(cSand, 0.34).multiplyScalar(0.80);
+      else if (dw === 2) c.copy(cSand).lerp(cGrass, 0.58);
       else if (y > 3) c.copy(cHill).lerp(cRock, Math.min(1, (y - 3) / 8));
       else {
         const n1 = Math.sin(x * 0.21 + z * 0.17) * 0.5 + 0.5;
@@ -8403,7 +8403,7 @@ body.noui #stage::after{display:none}
     '  vec3 d = vW - cameraPosition;',
     '  float dist = length(d);',
     '  vec3 dir = d / max(dist, 1e-4);',
-    '  float t1 = smoothstep(150.0, 620.0, dist);',
+    '  float t1 = smoothstep(85.0, 540.0, dist);',
     '  float t2 = smoothstep(520.0, 1150.0, dist);',
     '  vec3 col = mix(uDeep, uHaze * 0.58, t1);',
     '  col = mix(col, uHaze * 0.88, t2);',
@@ -8423,7 +8423,8 @@ body.noui #stage::after{display:none}
   '  float bmask = (1.0 - t2) * smoothstep(30.0, 150.0, dist);',
   '  col *= 1.0 + ((bw - 0.5) * 0.105 + (bw2 - 0.5) * 0.045) * bmask;',
   '  float wpatch = sin(vW.x * 0.021 + vW.z * 0.017 + 1.3) * sin(vW.x * 0.013 - vW.z * 0.024 - 0.7);',
-  '  col *= 1.0 + wpatch * 0.075 * (1.0 - t1);',
+  '  col *= 1.0 + wpatch * 0.115 * (1.0 - t1 * 0.75);',
+  '  col = mix(col, col * vec3(0.93, 1.01, 1.07), t1 * 0.65);',
   '  float hzn = smoothstep(420.0, 1050.0, dist);',
     '  col = mix(col, uHaze * 1.02, hzn * 0.92);',
     '  float br = sin(vW.x * 0.012 + uTime * 0.18) * sin(vW.z * 0.011 - uTime * 0.13);',
@@ -8482,6 +8483,38 @@ body.noui #stage::after{display:none}
     seaMat = gp.material;
     if (deco) deco.ground = gp;
   }
+  /* 小洲：远处水面上要有东西，水面才有纵深和尺度感。纯装饰。 */
+  function buildIslets() {
+    if (!deco || deco.islets || !scene) return;
+    const M = global.MODELS;
+    if (!M || typeof M.tree !== 'function') return;
+    const grp = new THREE.Group();
+    grp.name = 'cine-islets';
+    const moundMat = new THREE.MeshStandardMaterial({ color: 0x39432f, roughness: 0.95, metalness: 0.0 });
+    const spots = [[64,0.42,5.4],[78,1.28,4.2],[96,2.35,6.8],[110,3.42,5.0],[70,4.15,3.6],[88,5.05,6.0],[118,5.62,4.6]];
+    for (let i = 0; i < spots.length; i++) {
+      const rad = spots[i][0], ang = spots[i][1], sz = spots[i][2] * (0.75 + Math.random() * 0.5);
+      const cx = Math.cos(ang) * rad, cz = Math.sin(ang) * rad;
+      const mound = new THREE.Mesh(new THREE.CylinderGeometry(sz, sz * 1.22, 0.55, 10), moundMat);
+      mound.position.set(cx, -0.62, cz);
+      grp.add(mound);
+      const nt = 2 + ((Math.random() * 3) | 0);
+      for (let k = 0; k < nt; k++) {
+        const a2 = Math.random() * 6.28318, r2 = sz * Math.random() * 0.55;
+        const type = Math.random() < 0.28 ? 'pine' : (Math.random() < 0.30 ? 'willow' : 'camphor');
+        let tree;
+        try { tree = M.tree({ type: type, h: 5.5 + Math.random() * 2.5, tint: 0.2 + Math.random() * 0.5, shape: Math.random() }, Math.random); } catch (e) { continue; }
+        const k2 = 0.52 + Math.random() * 0.28;
+        tree.scale.set(k2 * (0.9 + Math.random() * 0.2), k2, k2 * (0.9 + Math.random() * 0.2));
+        tree.position.set(cx + Math.cos(a2) * r2, -0.40, cz + Math.sin(a2) * r2);
+        tree.rotation.y = Math.random() * 6.28318;
+        grp.add(tree);
+      }
+    }
+    scene.add(grp);
+    deco.islets = grp;
+  }
+
   function decorate() {    if (decorated || !scene) return;
     decorated = true;
     const grp = new THREE.Group();
@@ -8503,6 +8536,7 @@ body.noui #stage::after{display:none}
 
     // 远景：把村庄坐进一片开阔水面，一路亮到天光（不再是黑虚空）
     try { refreshSea(); } catch (e) { }
+    try { buildIslets(); } catch (e) { console.warn("[CINE] islets", e); }
     try {
       const fc = (scene.fog && scene.fog.color) ? scene.fog.color : new THREE.Color(0xcfd8ce);
       void grp;
