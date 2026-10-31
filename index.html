@@ -6527,8 +6527,8 @@ body.noui #stage::after{display:none}
           vec3 col = mix(uDeep, uShallow, 0.34 + 0.28 * w);
           // 河心深、近岸浅
           col = mix(col * 0.64, col, clamp(edge * 1.15, 0.0, 1.0));
-          // 岸边浑水与青苔
-          col = mix(col, uShallow * 0.70 + vec3(0.020, 0.034, 0.014), smoothstep(0.62, 1.0, edge) * 0.70);
+          // 岸边浑水与青苔（压深，不能提亮：否则贴岸会出现一条亮边）
+          col = mix(col, uDeep * 0.52 + vec3(0.010, 0.018, 0.008), smoothstep(0.55, 1.0, edge) * 0.78);
           // 大尺度色差
           col *= 0.94 + 0.12 * sin(pf.x * 0.21 + pf.y * 0.17);
           col = mix(col, uSky, clamp(fres * 0.85 + 0.05, 0.0, 1.0));
@@ -6564,8 +6564,8 @@ body.noui #stage::after{display:none}
             rc *= vec3(0.74, 0.86, 0.82);
             float amt = clamp(0.44 + fres * 1.20, 0.0, 0.90) * (1.0 - f * 0.55);
             amt *= mix(0.42, 1.0, clamp(edge * 1.4, 0.0, 1.0));
-            // 岸线最后 6% 抹掉反射：否则掠射角把天空反射成一条刺眼白边
-            amt *= 1.0 - smoothstep(0.94, 1.0, edge) * 0.85;
+            // 岸线反射收干净：掠射角处反射最强，不压就会在水陆交界留一条亮蓝边
+            amt *= 1.0 - smoothstep(0.80, 1.0, edge) * 0.95;
             // 贴图边界淡出：镜面外区域 clamp 取样会在水面上留下一条直缝
             amt *= smoothstep(0.0, 0.05, suv.x) * smoothstep(1.0, 0.95, suv.x);
             amt *= smoothstep(0.0, 0.05, suv.y) * smoothstep(1.0, 0.95, suv.y);
