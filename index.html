@@ -371,11 +371,13 @@ body.noui #stage::after{display:none}
       float g = h - 0.5;
       vec3 t = vec3(1.0) + g * uGrain * 0.45;
       if (uKind < 0.5) {                        // 白墙：墙脚返潮、上部雨痕
-        float damp = smoothstep(1.25, 0.10, p.y);
+        float damp = smoothstep(2.10, 0.04, p.y);
         float streak = dFBM(vec3(p.x*3.2, p.y*0.30, p.z*3.2));
-        t *= mix(1.0, 0.90, damp * 0.8);
-        t *= mix(1.0, 0.95, smoothstep(0.50, 0.86, streak));
+        t *= mix(1.0, 0.72, damp);
+        t *= mix(1.0, 0.92, smoothstep(0.46, 0.84, streak));
         t.b *= 1.02;
+        // 大块陈旧斑（复用已算好的高度场，不新增噪声调用，避免超出片元指令上限）
+        t *= mix(1.0, 0.86, smoothstep(0.46, 0.78, h));
       } else if (uKind < 1.5) {                 // 黛瓦：垄间压深
         float s = dStripe(p.x, 15.0, 5.0)*w.y + dStripe(p.z, 15.0, 5.0)*w.y;
         t *= 1.0 - s*0.10;
@@ -399,7 +401,7 @@ body.noui #stage::after{display:none}
     const amt = k === 'plaster' ? 0.30 : k === 'tile' ? 0.34 : k === 'leaf' ? 0.26
       : k === 'ground' ? 0.40 : 0.30;
     const relief = k === 'tile' ? 0.55 : k === 'stone' ? 0.34 : k === 'wood' ? 0.26
-      : k === 'plaster' ? 0.18 : k === 'ground' ? 0.24 : 0.12;
+      : k === 'plaster' ? 0.30 : k === 'ground' ? 0.24 : 0.12;
     return function (sh) {
       sh.uniforms.uKind = { value: kind };
       sh.uniforms.uGrain = { value: amt };
@@ -6562,6 +6564,11 @@ body.noui #stage::after{display:none}
             rc *= vec3(0.74, 0.86, 0.82);
             float amt = clamp(0.44 + fres * 1.20, 0.0, 0.90) * (1.0 - f * 0.55);
             amt *= mix(0.42, 1.0, clamp(edge * 1.4, 0.0, 1.0));
+            // 岸线最后 6% 抹掉反射：否则掠射角把天空反射成一条刺眼白边
+            amt *= 1.0 - smoothstep(0.94, 1.0, edge) * 0.85;
+            // 贴图边界淡出：镜面外区域 clamp 取样会在水面上留下一条直缝
+            amt *= smoothstep(0.0, 0.05, suv.x) * smoothstep(1.0, 0.95, suv.x);
+            amt *= smoothstep(0.0, 0.05, suv.y) * smoothstep(1.0, 0.95, suv.y);
             col = mix(col, rc, amt);
           }
 
@@ -6740,16 +6747,16 @@ body.noui #stage::after{display:none}
           const hx = dx !== 0;
           const jx = ((x * 7 + z * 13) % 5) * 0.006;
           const jz = ((x * 11 + z * 3) % 7) * 0.005;
-          g.add(GEO.box(hx ? 0.34 : 0.94 - jz, 1.5, hx ? 0.94 - jz : 0.34, 0x7c796d, {
-            x: wx0 + dx * 0.5, y: -0.72, z: wz0 + dz * 0.5, jitter: 0.07
+          g.add(GEO.box(hx ? 0.62 : 0.94 - jz, 1.5, hx ? 0.94 - jz : 0.62, 0x6f6c60, {
+            x: wx0 + dx * 0.56, y: -0.72, z: wz0 + dz * 0.56, jitter: 0.07
           }));
           // 水线湿带
-          g.add(GEO.box(hx ? 0.37 : 0.96 - jz, 0.34, hx ? 0.96 - jz : 0.37, 0x5b5a50, {
-            x: wx0 + dx * 0.5, y: -0.34, z: wz0 + dz * 0.5, jitter: 0.05
+          g.add(GEO.box(hx ? 0.66 : 0.96 - jz, 0.34, hx ? 0.96 - jz : 0.66, 0x5b5a50, {
+            x: wx0 + dx * 0.56, y: -0.34, z: wz0 + dz * 0.56, jitter: 0.05
           }));
           // 压顶石（错缝 + 进退）
-          g.add(GEO.box(hx ? 0.5 : 0.98 - jz, 0.11 + jx, hx ? 0.98 - jz : 0.5, 0x9a968a, {
-            x: wx0 + dx * (0.48 - jx * 2), y: 0.055 + jx * 0.5, z: wz0 + dz * (0.48 - jx * 2), jitter: 0.05
+          g.add(GEO.box(hx ? 0.92 : 1.10 - jz, 0.16 + jx, hx ? 1.10 - jz : 0.92, 0x847f72, {
+            x: wx0 + dx * (0.58 - jx * 2), y: 0.080 + jx * 0.5, z: wz0 + dz * (0.58 - jx * 2), jitter: 0.05
           }));
         }
       }
@@ -7654,13 +7661,13 @@ body.noui #stage::after{display:none}
     if (!sun) return;
 
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(3072, 3072);
     const sc = sun.shadow.camera;
-    sc.left = -240; sc.right = 240; sc.top = 240; sc.bottom = -240;
-    sc.near = 1; sc.far = 900;
+    sc.left = -96; sc.right = 96; sc.top = 96; sc.bottom = -96;
+    sc.near = 1; sc.far = 420;
     sc.updateProjectionMatrix();
     sun.shadow.bias = -0.0005;
-    sun.shadow.normalBias = 0.11;
+    sun.shadow.normalBias = 0.055;
     if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
     // target 必须在场景里，否则光线朝向可能不更新
     if (sun.target && sun.target.parent !== scene) scene.add(sun.target);
@@ -8136,12 +8143,16 @@ body.noui #stage::after{display:none}
       const gg = gc.getContext('2d');
       const deep = new THREE.Color(0x24393c);
       const rg = gg.createRadialGradient(gs / 2, gs / 2, gs * 0.02, gs / 2, gs / 2, gs * 0.5);
-      const near = new THREE.Color().copy(deep).lerp(fc, 0.10);
-      const mid = new THREE.Color().copy(deep).lerp(fc, 0.40);
+      const near = new THREE.Color().copy(deep).lerp(fc, 0.06);
+      const mid = new THREE.Color().copy(deep).lerp(fc, 0.22);
+      // 注意：这张贴图铺在半径 1600 的盘上，stop 是按半径百分比走的。
+      // 之前把「纯雾色」放在 stop 0.30（=世界半径 480）就得出一圈假地平线，
+      // 整幅背景变成一片牛奶白；现在把颜色变化推到 0.5 之外。
       rg.addColorStop(0.0, '#' + near.getHexString());
-      rg.addColorStop(0.075, '#' + mid.getHexString());
-      rg.addColorStop(0.175, '#' + new THREE.Color().copy(deep).lerp(fc, 0.74).getHexString());
-      rg.addColorStop(0.30, '#' + fc.getHexString());
+      rg.addColorStop(0.09, '#' + mid.getHexString());
+      rg.addColorStop(0.22, '#' + new THREE.Color().copy(deep).lerp(fc, 0.46).getHexString());
+      rg.addColorStop(0.50, '#' + new THREE.Color().copy(deep).lerp(fc, 0.72).getHexString());
+      rg.addColorStop(1.0, '#' + fc.getHexString());
       gg.fillStyle = rg; gg.fillRect(0, 0, gs, gs);
       // 水面细纹：横向短笔触，远看是起伏而不是噪点
       for (let i = 0; i < 1100; i++) {
@@ -8178,20 +8189,26 @@ body.noui #stage::after{display:none}
       grp.add(gp);
       deco.ground = gp;
 
-      // 远山：几道压在雾里的低丘，给地平线一点江南层次
-      const hillMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0x2a403f).lerp(fc, 0.34), fog: true });
+      // 远山：三圈低丘压在地平线上。关掉 fog 并预先按距离掺雾色，
+      // 否则在 fog far(≈330) 之外会被雾吃掉，等于没画（远处一片牛奶白）。
       for (let b = 0; b < 3; b++) {
-        const rad = 520 + b * 92;
+        const rad = 330 + b * 100;
         const cnt = 9 + b * 3;
+        const hillMat = new THREE.MeshBasicMaterial({
+          color: new THREE.Color(0x2c4342).lerp(fc, 0.40 + b * 0.16),
+          fog: false,
+          depthWrite: true
+        });
         for (let i = 0; i < cnt; i++) {
           const a = (i / cnt) * 6.283 + (b * 0.7) + Math.random() * 0.5;
-          const rr = rad * (0.86 + Math.random() * 0.28);
-          const hh = 16 + Math.random() * 30 + b * 8;
-          const ww = 60 + Math.random() * 90;
+          const rr = rad * (0.88 + Math.random() * 0.24);
+          const hh = 20 + Math.random() * 30 + b * 12;
+          const ww = 70 + Math.random() * 110;
           const cm = new THREE.Mesh(new THREE.ConeGeometry(ww, hh, 5, 1), hillMat);
-          cm.position.set(Math.cos(a) * rr, hh * 0.34 - 1.0, Math.sin(a) * rr);
+          cm.position.set(Math.cos(a) * rr, hh * 0.34 - 1.2, Math.sin(a) * rr);
           cm.scale.z = 0.5 + Math.random() * 0.4;
           cm.rotation.y = Math.random() * 3.14;
+          cm.renderOrder = -1;
           grp.add(cm);
         }
       }
